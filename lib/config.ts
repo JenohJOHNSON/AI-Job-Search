@@ -36,7 +36,14 @@ const envSchema = z.object({
 
 let memo: z.infer<typeof envSchema> | undefined;
 export function config() {
-  if (!memo) memo = envSchema.parse(process.env);
+  if (!memo) {
+    const parsed = envSchema.safeParse(process.env);
+    if (!parsed.success) {
+      const missing = parsed.error.issues.map(issue => issue.path.join(".")).join(", ");
+      throw new Error(`Invalid environment configuration. Set these Railway variables before starting the service: ${missing}`);
+    }
+    memo = parsed.data;
+  }
   return memo;
 }
 
