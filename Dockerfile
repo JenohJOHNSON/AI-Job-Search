@@ -16,6 +16,7 @@ RUN addgroup -S elan -g 1001 && adduser -S elan -u 1001 -G elan
 USER elan
 
 FROM base AS web
+ENV PORT=3000
 COPY --from=builder --chown=elan:elan /app/.next/standalone ./
 COPY --from=builder --chown=elan:elan /app/.next/static ./.next/static
 COPY --from=builder --chown=elan:elan /app/public ./public
