@@ -1,0 +1,6 @@
+import { NextRequest, NextResponse } from "next/server";
+import { assertSameOrigin, parseBody, requireUser, routeError } from "@/lib/api";
+import { db } from "@/lib/db";
+import { candidateProfileSchema, emptyCandidateProfile } from "@/lib/schemas";
+export async function GET() { try { const user = await requireUser(); const [profile, resumes] = await Promise.all([db.candidateProfile.findUnique({ where: { userId: user.id } }), db.resume.findMany({ where: { userId: user.id }, select: { id: true, fileName: true, mimeType: true, size: true, extractionStatus: true, suggestions: true, createdAt: true }, orderBy: { createdAt: "desc" } })]); return NextResponse.json({ profile: profile ? candidateProfileSchema.parse(profile.data) : emptyCandidateProfile, version: profile?.version ?? 0, resumes }); } catch (error) { return routeError(error); } }
+export async function PUT(request: NextRequest) { try { assertSameOrigin(request); const user = await requireUser(); const input = await parseBody(request, candidateProfileSchema); const profile = await db.candidateProfile.upsert({ where: { userId: user.id }, create: { userId: user.id, data: input }, update: { data: input, version: { increment: 1 } } }); return NextResponse.json({ profile: candidateProfileSchema.parse(profile.data), version: profile.version }); } catch (error) { return routeError(error); } }

@@ -1,0 +1,12 @@
+import { describe, expect, it } from "vitest";
+import { AshbyProvider } from "@/providers/ashby";
+import { GenericProvider } from "@/providers/generic";
+import { GreenhouseProvider } from "@/providers/greenhouse";
+import { LeverProvider } from "@/providers/lever";
+describe("offline provider normalization", () => {
+  it("normalizes a French Greenhouse vacancy", () => { const job = new GreenhouseProvider({ boards: ["acme"] }).normalize({ board: "Acme", job: { id: 42, title: "Product Manager IA", absolute_url: "https://boards.greenhouse.io/acme/jobs/42", location: { name: "Paris, France" }, content: "<p>Construire des produits IA</p>", updated_at: "2026-09-01T10:00:00Z" } }); expect(job.descriptionClean).toBe("Construire des produits IA"); expect(job.country).toBe("FR"); });
+  it("normalizes Lever without salary instead of inventing zero", () => { const job = new LeverProvider({}).normalize({ board: "Acme", job: { id: "abc", text: "Data PM", hostedUrl: "https://jobs.lever.co/acme/abc", applyUrl: "https://jobs.lever.co/acme/abc/apply", categories: { location: "Remote - France", commitment: "CDI" }, workplaceType: "remote", descriptionPlain: "Build data products" } }); expect(job.salaryMin).toBeNull(); expect(job.remoteType).toBe("REMOTE"); });
+  it("normalizes Ashby employment and work style", () => { const job = new AshbyProvider({}).normalize({ board: "Acme", job: { id: "j1", title: "Product Lead", jobUrl: "https://jobs.ashbyhq.com/acme/j1", location: "Paris", workplaceType: "Hybrid", employmentType: "FullTime", descriptionPlain: "Lead product" } }); expect(job.remoteType).toBe("HYBRID"); expect(job.contractType).toBe("FullTime"); });
+  it("normalizes schema.org JobPosting", () => { const job = new GenericProvider({}).normalize({ pageUrl: "https://careers.example.com/jobs", item: { "@type": "JobPosting", identifier: { value: "x1" }, title: "PM", url: "https://careers.example.com/x1", hiringOrganization: { name: "Example" }, jobLocation: { address: { addressLocality: "Lyon", addressCountry: "FR" } }, employmentType: "FULL_TIME", description: "<p>Bonjour</p>", datePosted: "2026-09-01" } }); expect(job.location).toBe("Lyon, FR"); expect(job.descriptionClean).toBe("Bonjour"); });
+  it("gracefully reports an unconfigured provider", async () => { const result = await new GreenhouseProvider({}).search({ queries: [], locations: [], remotePreferences: [], datePostedWindow: 3, maxJobs: 10 }); expect(result.jobs).toEqual([]); expect(result.warnings[0]).toContain("board slugs"); });
+});

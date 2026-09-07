@@ -1,0 +1,419 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum JobStatus {
+  ACTIVE
+  EXPIRED
+  REMOVED
+}
+enum ApplicationStatus {
+  NEW
+  REVIEWED
+  SAVED
+  APPLY
+  APPLIED
+  RECRUITER_CONTACT
+  INTERVIEW
+  TECHNICAL_INTERVIEW
+  FINAL_INTERVIEW
+  OFFER
+  REJECTED
+  WITHDRAWN
+  ARCHIVED
+}
+enum RunStatus {
+  QUEUED
+  RUNNING
+  FINISHED
+  FAILED
+}
+enum RunTrigger {
+  MANUAL
+  GITHUB_ACTION
+  SCHEDULED
+  API
+}
+enum ProviderStatus {
+  HEALTHY
+  DEGRADED
+  FAILED
+  DISABLED
+}
+enum TaskStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+enum Recommendation {
+  STRONG_APPLY
+  APPLY
+  MAYBE
+  SKIP
+}
+enum ErrorCode {
+  RATE_LIMIT
+  TIMEOUT
+  PARSER_CHANGED
+  BLOCKED
+  AUTH
+  NETWORK
+  AI_PROVIDER
+  DATABASE
+  UNKNOWN
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  sessions     Session[]
+  profile      CandidateProfile?
+  resumes      Resume[]
+  searchProfiles SearchProfile[]
+  applications Application[]
+  documents    GeneratedDocument[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model CandidateProfile {
+  id        String   @id @default(cuid())
+  data      Json
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Resume {
+  id               String   @id @default(cuid())
+  fileName         String
+  mimeType         String
+  size             Int
+  contentHash      String
+  sourceText       String
+  extractionStatus String   @default("PENDING_REVIEW")
+  suggestions      Json?
+  createdAt        DateTime @default(now())
+  userId           String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId, createdAt])
+}
+
+model SearchProfile {
+  id        String   @id @default(cuid())
+  name      String
+  enabled   Boolean  @default(true)
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  queries   SearchQuery[]
+  @@index([userId, enabled])
+}
+
+model SearchQuery {
+  id              String   @id @default(cuid())
+  query           String
+  fingerprint     String
+  createdAt       DateTime @default(now())
+  lastUsedAt      DateTime?
+  searchProfileId String
+  searchProfile   SearchProfile @relation(fields: [searchProfileId], references: [id], onDelete: Cascade)
+  @@unique([searchProfileId, fingerprint])
+}
+
+model Company {
+  id          String   @id @default(cuid())
+  normalizedName String @unique
+  name        String
+  domain      String?  @unique
+  logo        String?
+  metadata    Json?
+  enrichedAt  DateTime?
+  jobs        Job[]
+}
+
+model Job {
+  id                 String   @id @default(cuid())
+  canonicalHash      String   @unique
+  contentFingerprint String
+  companyName        String
+  companyDomain      String?
+  title              String
+  normalizedTitle    String
+  location           String
+  city               String?
+  region             String?
+  country            String   @default("FR")
+  remoteType         String   @default("UNKNOWN")
+  contractType       String   @default("UNKNOWN")
+  employmentType     String?
+  salaryMin          Int?
+  salaryMax          Int?
+  salaryCurrency     String   @default("EUR")
+  descriptionRaw     String
+  descriptionClean   String
+  responsibilities  Json     @default("[]")
+  requirements       Json     @default("[]")
+  preferredRequirements Json  @default("[]")
+  benefits           Json     @default("[]")
+  experienceMin      Int?
+  experienceMax      Int?
+  education          String?
+  skillsRequired     Json     @default("[]")
+  skillsPreferred    Json     @default("[]")
+  languagesRequired  Json     @default("[]")
+  publishedAt        DateTime?
+  discoveredAt       DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  expiresAt          DateTime?
+  recruiterName      String?
+  recruiterUrl       String?
+  applicationUrl     String
+  status             JobStatus @default(ACTIVE)
+  preliminaryScore   Int?
+  matchScore         Int?
+  companyId          String?
+  company            Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  sources            JobPostingSource[]
+  analyses           JobAnalysis[]
+  application        Application?
+  documents          GeneratedDocument[]
+  @@index([publishedAt])
+  @@index([discoveredAt])
+  @@index([matchScore])
+  @@index([companyName])
+  @@index([normalizedTitle])
+  @@index([status])
+  @@index([contentFingerprint])
+}
+
+model JobPostingSource {
+  id            String   @id @default(cuid())
+  provider      String
+  sourceJobId   String
+  sourceUrl     String
+  extractor     String
+  isPrimary     Boolean  @default(false)
+  sourceMetadata Json?
+  rawPayload    Json?
+  firstSeenAt   DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+  jobId         String
+  job           Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  @@unique([provider, sourceJobId])
+  @@unique([sourceUrl])
+  @@index([provider])
+  @@index([jobId])
+}
+
+model JobAnalysis {
+  id                 String   @id @default(cuid())
+  profileVersion     Int
+  contentFingerprint String
+  result             Json
+  score              Int
+  recommendation     Recommendation
+  confidence         Float
+  model              String
+  provider           String
+  inputTokens        Int
+  outputTokens       Int
+  estimatedCost      Decimal  @db.Decimal(12, 6)
+  createdAt          DateTime @default(now())
+  jobId              String
+  job                 Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  @@unique([jobId, profileVersion, contentFingerprint])
+  @@index([score])
+}
+
+model Application {
+  id               String   @id @default(cuid())
+  status           ApplicationStatus @default(NEW)
+  appliedAt        DateTime?
+  notes            String?
+  salaryDiscussed  Int?
+  contact          String?
+  nextAction       String?
+  nextActionDate   DateTime?
+  interviewDates   Json     @default("[]")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId            String   @unique
+  job              Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  history          ApplicationHistory[]
+  @@index([userId, status])
+}
+
+model ApplicationHistory {
+  id            String   @id @default(cuid())
+  fromStatus    ApplicationStatus?
+  toStatus      ApplicationStatus
+  note          String?
+  createdAt     DateTime @default(now())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  @@index([applicationId, createdAt])
+}
+
+model SearchRun {
+  id                    String    @id @default(cuid())
+  status                RunStatus @default(QUEUED)
+  trigger               RunTrigger
+  idempotencyKey        String?   @unique
+  startedAt             DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime  @default(now())
+  providersAttempted    Int       @default(0)
+  providersSuccessful   Int       @default(0)
+  providersFailed       Int       @default(0)
+  jobsDiscovered        Int       @default(0)
+  jobsNew               Int       @default(0)
+  jobsDuplicate         Int       @default(0)
+  jobsAnalyzed          Int       @default(0)
+  jobsHighMatch         Int       @default(0)
+  errors                Json      @default("[]")
+  providerRuns          ProviderRun[]
+  tasks                 Task[]
+  @@index([createdAt])
+  @@index([status])
+}
+
+model ProviderSetting {
+  id          String   @id
+  name        String
+  enabled     Boolean  @default(false)
+  supported   Boolean  @default(false)
+  maxJobs     Int      @default(50)
+  rateLimitMs Int      @default(500)
+  strategies  Json     @default("[]")
+  config      Json     @default("{}")
+  updatedAt   DateTime @updatedAt
+  health      ProviderHealth?
+  runs        ProviderRun[]
+}
+
+model ProviderHealth {
+  id             String @id @default(cuid())
+  status         ProviderStatus @default(DISABLED)
+  message        String?
+  lastSuccessAt  DateTime?
+  jobsDiscovered Int @default(0)
+  errorCount     Int @default(0)
+  attemptCount   Int @default(0)
+  extractionStats Json @default("{}")
+  updatedAt      DateTime @updatedAt
+  providerId     String @unique
+  provider       ProviderSetting @relation(fields: [providerId], references: [id], onDelete: Cascade)
+}
+
+model ProviderRun {
+  id             String @id @default(cuid())
+  status         ProviderStatus
+  jobsDiscovered Int @default(0)
+  jobsValid      Int @default(0)
+  jobsInvalid    Int @default(0)
+  durationMs     Int @default(0)
+  errorCode      ErrorCode?
+  errorMessage   String?
+  extractorStats Json @default("{}")
+  createdAt      DateTime @default(now())
+  runId          String
+  run            SearchRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  providerId     String
+  provider       ProviderSetting @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  @@index([runId])
+  @@index([providerId, createdAt])
+}
+
+model Task {
+  id          String @id @default(cuid())
+  type        String
+  status      TaskStatus @default(QUEUED)
+  payload     Json
+  idempotencyKey String @unique
+  attempts    Int @default(0)
+  maxAttempts Int @default(4)
+  runAt       DateTime @default(now())
+  leasedUntil DateTime?
+  leaseToken  String?
+  error       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  completedAt DateTime?
+  searchRunId String?
+  searchRun   SearchRun? @relation(fields: [searchRunId], references: [id], onDelete: Cascade)
+  @@index([status, runAt])
+  @@index([leasedUntil])
+}
+
+model AIUsage {
+  id             String @id @default(cuid())
+  calendarDate   DateTime @db.Date
+  provider       String
+  model          String
+  operation      String
+  status         String
+  reservationId  String @unique
+  inputTokens    Int @default(0)
+  outputTokens   Int @default(0)
+  estimatedCost  Decimal @db.Decimal(12, 6)
+  reservedCost   Decimal @db.Decimal(12, 6)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@index([calendarDate, status])
+}
+
+model GeneratedDocument {
+  id        String @id @default(cuid())
+  kind      String
+  language  String
+  markdown  String
+  createdAt DateTime @default(now())
+  userId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId     String
+  job       Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  @@index([userId, jobId])
+}
+
+model Notification {
+  id             String @id @default(cuid())
+  channel        String
+  recipientHash  String
+  calendarDate   DateTime @db.Date
+  status         String
+  externalId     String?
+  error          String?
+  createdAt      DateTime @default(now())
+  @@unique([channel, recipientHash, calendarDate])
+}
+
+model SystemSetting {
+  key       String @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}

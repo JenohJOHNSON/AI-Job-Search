@@ -1,0 +1,22 @@
+name: Daily job search
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+concurrency:
+  group: daily-job-search
+  cancel-in-progress: false
+jobs:
+  enqueue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Queue Railway search run
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          JOB_RUNNER_SECRET: ${{ secrets.JOB_RUNNER_SECRET }}
+        run: |
+          test -n "$APP_URL" && test -n "$JOB_RUNNER_SECRET"
+          curl --fail-with-body --retry 3 --retry-all-errors \
+            --request POST "$APP_URL/api/internal/jobs/run" \
+            --header "Authorization: Bearer $JOB_RUNNER_SECRET" \
+            --header "Idempotency-Key: github-${{ github.run_id }}-${{ github.run_attempt }}"

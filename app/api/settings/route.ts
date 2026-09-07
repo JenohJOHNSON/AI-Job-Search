@@ -1,0 +1,9 @@
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { assertSameOrigin, parseBody, requireUser, routeError } from "@/lib/api";
+import { aiConfigured, config } from "@/lib/config";
+import { db } from "@/lib/db";
+const schema = z.object({ notifications: z.object({ emailEnabled: z.boolean(), telegramEnabled: z.boolean() }).strict() }).strict();
+async function flag(key: string) { return (await db.systemSetting.findUnique({ where: { key } }))?.value === true; }
+export async function GET() { try { await requireUser(); const env = config(); return NextResponse.json({ ai: { provider: env.AI_PROVIDER, model: env.AI_MODEL, configured: aiConfigured() }, limits: { maxAiAnalysesPerDay: env.MAX_AI_ANALYSES_PER_DAY, maxLlmCostPerDay: env.MAX_LLM_COST_PER_DAY, aiMatchThreshold: env.AI_MATCH_THRESHOLD, maxJobsPerProvider: env.MAX_JOBS_PER_PROVIDER, maxTotalJobsPerRun: env.MAX_TOTAL_JOBS_PER_RUN, notificationScoreThreshold: env.NOTIFICATION_SCORE_THRESHOLD }, notifications: { emailEnabled: await flag("notifications.email"), telegramEnabled: await flag("notifications.telegram") }, schedule: { cron: "17 5 * * *", timezone: "Europe/Paris (UTC schedule; see README)" }, appUrl: env.APP_URL }); } catch (error) { return routeError(error); } }
+export async function PATCH(request: NextRequest) { try { assertSameOrigin(request); await requireUser(); const input = await parseBody(request, schema); await db.$transaction([db.systemSetting.upsert({ where: { key: "notifications.email" }, create: { key: "notifications.email", value: input.notifications.emailEnabled }, update: { value: input.notifications.emailEnabled } }), db.systemSetting.upsert({ where: { key: "notifications.telegram" }, create: { key: "notifications.telegram", value: input.notifications.telegramEnabled }, update: { value: input.notifications.telegramEnabled } })]); return NextResponse.json(input); } catch (error) { return routeError(error); } }
