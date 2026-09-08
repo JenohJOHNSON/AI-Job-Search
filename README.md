@@ -101,8 +101,8 @@ Both need the same environment and PostgreSQL. The web target reads Railway's `P
 2. Create a Railway project and add PostgreSQL.
 3. Add a web service from the repository. `railway.json` selects the `web` Docker target and `/api/health`.
 4. Add the required environment variables. Set `DATABASE_URL` from the PostgreSQL service and `APP_URL` to the final HTTPS domain.
-5. Run `npm run db:migrate` once as a Railway pre-deploy or one-off command before starting the app.
-6. Add a second service from the same repository. Point its config file at `railway.worker.json`, or set Docker target `worker` and start command `./node_modules/.bin/tsx workers/main.ts`.
+5. The `web` and `worker` images run `prisma migrate deploy` before starting, so committed migrations are applied automatically against the configured Neon `DATABASE_URL`. If you prefer a manual first migration, run `npm run db:migrate` locally with the Neon URL before deploying.
+6. Add a second service from the same repository. Point its config file at `railway.worker.json`, or set Docker target `worker` and start command `sh -c './node_modules/.bin/prisma migrate deploy && exec ./node_modules/.bin/tsx workers/main.ts'`.
 7. Deploy both services and verify `/api/health`, initial owner setup and that the worker is running.
 8. Add GitHub Actions secrets `APP_URL` and `JOB_RUNNER_SECRET`.
 9. Run **Daily job search** with `workflow_dispatch`, then verify the queued run and provider health in the dashboard.

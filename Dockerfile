@@ -20,9 +20,14 @@ ENV PORT=3000
 COPY --from=builder --chown=elan:elan /app/.next/standalone ./
 COPY --from=builder --chown=elan:elan /app/.next/static ./.next/static
 COPY --from=builder --chown=elan:elan /app/public ./public
+# Keep Prisma's migration CLI and committed SQL beside the standalone server so
+# every Railway deployment can bring a new Neon database up to date before serving.
+COPY --from=builder --chown=elan:elan /app/node_modules ./node_modules
+COPY --from=builder --chown=elan:elan /app/package.json /app/tsconfig.json ./
+COPY --from=builder --chown=elan:elan /app/prisma ./prisma
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD wget -qO- http://127.0.0.1:${PORT:-3000}/api/health || exit 1
-CMD ["node", "server.js"]
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && exec node server.js"]
 
 FROM base AS worker
 COPY --from=builder --chown=elan:elan /app/node_modules ./node_modules
@@ -33,4 +38,4 @@ COPY --chown=elan:elan ai ./ai
 COPY --chown=elan:elan matching ./matching
 COPY --chown=elan:elan providers ./providers
 COPY --chown=elan:elan workers ./workers
-CMD ["./node_modules/.bin/tsx", "workers/main.ts"]
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && exec ./node_modules/.bin/tsx workers/main.ts"]
