@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ZodError, type ZodType } from "zod";
+import { config } from "@/lib/config";
 import { currentUser } from "@/lib/security/session";
 
 export class HttpError extends Error { constructor(public status: number, message: string) { super(message); } }
@@ -10,7 +11,12 @@ export async function requireUser() {
 }
 export function assertSameOrigin(request: NextRequest) {
   const origin = request.headers.get("origin");
-  if (origin && origin !== request.nextUrl.origin) throw new HttpError(403, "Origin rejected.");
+  if (!origin) return;
+  const allowedOrigins = new Set([
+    request.nextUrl.origin,
+    new URL(config().APP_URL).origin,
+  ]);
+  if (!allowedOrigins.has(origin)) throw new HttpError(403, "Origin rejected.");
 }
 export async function parseBody<T>(request: Request, schema: ZodType<T>): Promise<T> {
   const text = await request.text();
