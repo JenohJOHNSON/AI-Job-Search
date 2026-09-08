@@ -1,5 +1,5 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": { "builder": "DOCKERFILE", "dockerfilePath": "Dockerfile", "dockerBuildTarget": "web" },
-  "deploy": { "startCommand": "sh -c './node_modules/.bin/prisma migrate deploy && exec node server.js'", "healthcheckPath": "/api/health", "healthcheckTimeout": 120, "restartPolicyType": "ON_FAILURE", "restartPolicyMaxRetries": 5 }
+  "deploy": { "startCommand": "sh -c './node_modules/.bin/prisma migrate deploy && exec env PORT=3000 HOSTNAME=0.0.0.0 node server.js'", "healthcheckPath": "/api/health", "healthcheckTimeout": 120, "restartPolicyType": "ON_FAILURE", "restartPolicyMaxRetries": 5 }
 }

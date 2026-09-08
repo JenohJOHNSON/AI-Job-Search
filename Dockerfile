@@ -30,7 +30,7 @@ CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && exec ./node_modul
 # without an explicit target) must produce the HTTP application, never the
 # background worker.
 FROM base AS web
-ENV PORT=3000
+ENV PORT=3000 HOSTNAME=0.0.0.0
 COPY --from=builder --chown=elan:elan /app/.next/standalone ./
 COPY --from=builder --chown=elan:elan /app/.next/static ./.next/static
 COPY --from=builder --chown=elan:elan /app/public ./public
@@ -41,4 +41,4 @@ COPY --from=builder --chown=elan:elan /app/package.json /app/tsconfig.json ./
 COPY --from=builder --chown=elan:elan /app/prisma ./prisma
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD wget -qO- http://127.0.0.1:${PORT:-3000}/api/health || exit 1
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && exec node server.js"]
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && exec env PORT=3000 HOSTNAME=0.0.0.0 node server.js"]
