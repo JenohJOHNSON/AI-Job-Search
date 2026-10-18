@@ -87,4 +87,5 @@ jobs:
           sleep 15
           docker logs worker | tail -20
           docker logs worker | grep -q worker_started
+          if docker logs worker 2>&1 | grep -q -E 'worker_loop_error|worker_crashed|scheduler_failed'; then echo 'worker reported errors'; exit 1; fi
           test "$(docker inspect -f '{{.State.Running}}' worker)" = true
