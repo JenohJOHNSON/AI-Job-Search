@@ -1,11 +1,35 @@
 import { normalizedJobSchema, type NormalizedJob } from "@/lib/schemas";
-import { cleanText, fixedFetch, jobMatches, publishedRecently } from "@/providers/core";
+import { checkBoards, crawlBoards, prettySlug } from "@/providers/board";
+import { cleanText, fixedFetch } from "@/providers/core";
 import { ProviderError, type JobProvider, type ProviderConfig, type ProviderHealth, type ProviderSearchResult, type SearchRequest } from "@/providers/types";
-type AshbyJob = { id: string; title: string; jobUrl: string; applyUrl?: string; location?: string; workplaceType?: string; employmentType?: string; descriptionPlain?: string; descriptionHtml?: string; publishedAt?: string; isListed?: boolean };
+
+type AshbyJob = {
+  id: string; title: string; jobUrl: string; applyUrl?: string; location?: string; secondaryLocations?: { location?: string }[]; isRemote?: boolean; workplaceType?: string;
+  employmentType?: string; descriptionPlain?: string; descriptionHtml?: string; publishedAt?: string; isListed?: boolean; team?: string; department?: string;
+  compensation?: { summaryComponents?: { compensationType?: string; interval?: string; currencyCode?: string; minValue?: number; maxValue?: number }[] };
+};
+const hint = "Add Ashby board names in provider settings (the part after jobs.ashbyhq.com/).";
+const employment: Record<string, string> = { FullTime: "Full time", PartTime: "Part time", Contract: "Contract", Intern: "Internship", Temporary: "Temporary" };
+
 export class AshbyProvider implements JobProvider {
   id = "ashby"; constructor(private config: ProviderConfig) {}
-  normalize(raw: unknown): NormalizedJob { const { job, board } = raw as { job: AshbyJob; board: string }; const type = job.workplaceType?.toLowerCase(); return normalizedJobSchema.parse({ source: this.id, sourceJobId: job.id, sourceUrl: job.jobUrl, applicationUrl: job.applyUrl || job.jobUrl, companyName: board, title: job.title, location: job.location || "France", remoteType: type === "remote" ? "REMOTE" : type === "hybrid" ? "HYBRID" : type === "onsite" ? "ONSITE" : "UNKNOWN", contractType: job.employmentType || "UNKNOWN", descriptionRaw: job.descriptionPlain || job.descriptionHtml || "", descriptionClean: cleanText(job.descriptionPlain || job.descriptionHtml || ""), publishedAt: job.publishedAt ? new Date(job.publishedAt).toISOString() : null, extractor: "ashby_public_job_board_api", sourceMetadata: { board } }); }
-  async search(request: SearchRequest): Promise<ProviderSearchResult> { const jobs: NormalizedJob[] = []; let fetched = 0, invalid = 0; const warnings: string[] = []; for (const board of this.config.boards ?? []) { try { const response = await fixedFetch(`https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(board)}`); const data = await response.json() as { jobs?: AshbyJob[] }; for (const raw of data.jobs ?? []) { if (raw.isListed === false) continue; fetched++; try { const job = this.normalize({ job: raw, board }); if (jobMatches(`${job.title} ${job.location} ${job.descriptionClean}`, request.queries, request.locations) && publishedRecently(job.publishedAt, request.datePostedWindow)) jobs.push(job); } catch { invalid++; } if (jobs.length >= request.maxJobs) break; } } catch (error) { warnings.push(`${board}: ${(error as Error).message}`); } if (jobs.length >= request.maxJobs) break; } if (!this.config.boards?.length) warnings.push("Add Ashby board names in provider settings."); return { jobs, stats: { fetched, valid: jobs.length, invalid }, warnings }; }
-  async fetchDetails(url: string) { const job = (await this.search({ queries: [], locations: [], remotePreferences: [], datePostedWindow: 30, maxJobs: 500 })).jobs.find(item => item.sourceUrl === url); if (!job) throw new ProviderError("PARSER_CHANGED", "Job not found.", false); return job; }
-  async healthCheck(): Promise<ProviderHealth> { return { status: this.config.boards?.length ? "HEALTHY" : "DEGRADED", detail: this.config.boards?.length ? "Public board API configured." : "No board names configured." }; }
+  normalize(raw: unknown): NormalizedJob {
+    const { job, board } = raw as { job: AshbyJob; board: string }; const type = job.workplaceType?.toLowerCase();
+    const salary = job.compensation?.summaryComponents?.find(item => item.compensationType === "Salary" && /year/i.test(item.interval ?? "") && item.minValue && item.maxValue);
+    const locations = [job.location, ...(job.secondaryLocations ?? []).map(item => item.location)].filter(Boolean).join("; ");
+    const description = job.descriptionPlain || cleanText(job.descriptionHtml || "");
+    return normalizedJobSchema.parse({ source: this.id, sourceJobId: job.id, sourceUrl: job.jobUrl, applicationUrl: job.applyUrl || job.jobUrl, companyName: prettySlug(board), title: job.title, location: locations, remoteType: type === "remote" || (job.isRemote && !type) ? "REMOTE" : type === "hybrid" ? "HYBRID" : type === "onsite" ? "ONSITE" : "UNKNOWN", contractType: (job.employmentType && employment[job.employmentType]) || job.employmentType || "UNKNOWN", salaryMin: salary ? Math.round(salary.minValue!) : null, salaryMax: salary ? Math.round(salary.maxValue!) : null, salaryCurrency: salary?.currencyCode?.length === 3 ? salary.currencyCode : "EUR", descriptionRaw: job.descriptionHtml || description, descriptionClean: description, publishedAt: job.publishedAt ? new Date(job.publishedAt).toISOString() : null, extractor: "ashby_public_job_board_api", sourceMetadata: { board, team: job.team ?? job.department } });
+  }
+  private fetchBoard = async (board: string) => {
+    const data = await (await fixedFetch(`https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(board)}?includeCompensation=true`)).json() as { jobs?: AshbyJob[] };
+    return (data.jobs ?? []).filter(job => job.isListed !== false).map(job => ({ job, board }));
+  };
+  async search(_request: SearchRequest): Promise<ProviderSearchResult> {
+    return crawlBoards({ provider: this.id, boards: this.config.boards ?? [], rateLimitMs: this.config.rateLimitMs, emptyHint: hint, fetchBoard: this.fetchBoard, idOf: raw => raw.job.id, normalize: raw => this.normalize(raw) });
+  }
+  async fetchDetails(url: string) {
+    const job = (await this.search({ queries: [], locations: [], remotePreferences: [], datePostedWindow: 30, maxJobs: 500 })).jobs.find(item => item.sourceUrl === url);
+    if (!job) throw new ProviderError("NOT_FOUND", "Job not found.", false); return job;
+  }
+  async healthCheck(): Promise<ProviderHealth> { return checkBoards({ boards: this.config.boards ?? [], rateLimitMs: this.config.rateLimitMs, emptyHint: hint, fetchBoard: board => this.fetchBoard(board) }); }
 }

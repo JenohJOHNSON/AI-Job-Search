@@ -88,6 +88,7 @@ export const normalizedJobSchema = z.object({
   publishedAt: z.string().datetime().nullable().default(null),
   expiresAt: z.string().datetime().nullable().default(null),
   extractor: z.string().trim().min(1).max(100),
+  scope: z.string().trim().max(300).optional(),
   sourceMetadata: z.record(z.string(), z.unknown()).default({})
 }).strict();
 export type NormalizedJob = z.infer<typeof normalizedJobSchema>;
