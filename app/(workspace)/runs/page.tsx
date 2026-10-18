@@ -17,7 +17,7 @@ export default function RunsPage() {
       <section className="panel">{data.runs.map(run => {
         const errors = (Array.isArray(run.errors) ? run.errors : []) as RunError[]; const took = seconds(run);
         return <details className="run-row" key={run.id} open={run.status === 'FAILED' || run.status === 'RUNNING' || run.status === 'QUEUED'}>
-          <summary style={{ gridColumn: '1 / -1', cursor: 'pointer', display: 'grid', gridTemplateColumns: '160px 1fr 1fr 1fr', gap: 15, alignItems: 'center' }}>
+          <summary className="run-summary">
             <div><Badge tone={tone(run.status)}>{humanize(run.status)}</Badge><span className="table-secondary">{date(run.createdAt, true)} · {humanize(run.trigger)}{took ? ` · ${took}s` : ''}</span></div>
             <div><strong>{run.jobsNew} new</strong><span className="table-secondary">{run.jobsDuplicate} already known · {run.jobsDiscovered} seen</span></div>
             <div><strong>{run.jobsAnalyzed} AI analysed</strong><span className="table-secondary">{run.jobsHighMatch} high matches</span></div>

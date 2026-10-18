@@ -35,3 +35,5 @@ details.job-card summary{cursor:pointer}
 .page-content{min-width:0}.grid>*,.section-stack>*{min-width:0}.panel{min-width:0;max-width:100%}
 /* Wide tables and the board scroll inside their own box; paint containment stops their width from widening the page on phones. */
 .table-scroll,.kanban7{contain:paint}
+.run-summary{grid-column:1/-1;cursor:pointer;display:grid;grid-template-columns:160px 1fr 1fr 1fr;gap:15px;align-items:center}.run-detail,.run-detail *{overflow-wrap:anywhere}
+@media(max-width:760px){.run-summary{grid-template-columns:1fr 1fr}}
