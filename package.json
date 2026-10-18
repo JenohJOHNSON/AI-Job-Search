@@ -2,7 +2,9 @@
   "name": "elan-job-search",
   "version": "0.1.0",
   "private": true,
-  "engines": { "node": ">=20.9" },
+  "engines": {
+    "node": ">=20.9"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
@@ -18,6 +20,7 @@
   "dependencies": {
     "@prisma/client": "6.12.0",
     "cheerio": "1.1.2",
+    "docx": "9.5.1",
     "ipaddr.js": "2.2.0",
     "lucide-react": "0.468.0",
     "mammoth": "1.12.2",
@@ -31,7 +34,10 @@
     "zod": "4.1.12"
   },
   "overrides": {
-    "next": { "postcss": "8.5.23", "sharp": "0.35.4" }
+    "next": {
+      "postcss": "8.5.23",
+      "sharp": "0.35.4"
+    }
   },
   "devDependencies": {
     "@eslint/eslintrc": "3.2.0",

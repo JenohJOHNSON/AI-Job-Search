@@ -59,7 +59,7 @@ export const searchProfileInputSchema = z.object({
   salaryMin: z.coerce.number().int().min(0).max(10_000_000).nullable().default(null),
   contractTypes: strings,
   seniority: strings,
-  datePostedWindow: z.coerce.number().int().min(1).max(30).default(3),
+  datePostedWindow: z.coerce.number().int().min(1).max(30).default(7),
   providers: strings,
   minimumMatchScore: z.coerce.number().int().min(0).max(100).default(40)
 }).strict();
@@ -144,12 +144,29 @@ export const manualJobSchema = z.object({
   salaryMax: z.coerce.number().int().min(0).nullable().optional()
 }).strict();
 
+/** Accepts a bare slug or a pasted board URL (https://boards.greenhouse.io/acme/jobs/1) and returns the slug. */
+export function boardSlug(value: string) {
+  const trimmed = value.trim();
+  if (/^https?:\/\//i.test(trimmed) || /^[a-z0-9-]+(\.[a-z0-9-]+)+\//i.test(trimmed)) {
+    try { const first = new URL(/^https?:/i.test(trimmed) ? trimmed : `https://${trimmed}`).pathname.split("/").filter(Boolean)[0]; return first ?? ""; } catch { return ""; }
+  }
+  return trimmed;
+}
+const slug = z.string().transform(boardSlug).pipe(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/, "Board names may only contain letters, digits, dots, dashes and underscores."));
+const hostname = z.string().trim().toLowerCase().regex(/^(?=.{1,253}$)([a-z0-9-]+\.)+[a-z]{2,}$/, "Enter a host name such as careers.example.com.");
+const httpsUrl = z.string().trim().url().max(2_000).refine(value => new URL(value).protocol === "https:", "Career page URLs must use HTTPS.");
+
 export const providerPatchSchema = z.object({
   enabled: z.boolean().optional(),
   maxJobs: z.coerce.number().int().min(1).max(500).optional(),
   rateLimitMs: z.coerce.number().int().min(100).max(60_000).optional(),
   strategies: z.array(z.string().max(100)).max(10).optional(),
-  config: z.object({ boards: strings.optional(), urls: z.array(publicUrl).max(100).optional(), allowedHosts: strings.optional() }).partial().optional()
+  config: z.object({ boards: z.array(slug).max(100), urls: z.array(httpsUrl).max(100), allowedHosts: z.array(hostname).max(100) }).partial().superRefine((value, context) => {
+    for (const url of value.urls ?? []) {
+      const host = new URL(url).hostname;
+      if (!(value.allowedHosts ?? []).some(allowed => host === allowed || host.endsWith(`.${allowed}`))) context.addIssue({ code: "custom", message: `${host} must be listed in allowed hosts.` });
+    }
+  }).optional()
 }).strict();
 
 export function parseJson<T>(schema: z.ZodType<T>, value: unknown): T {
