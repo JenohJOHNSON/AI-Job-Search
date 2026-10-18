@@ -7,3 +7,4 @@ coverage/
 uploads/
 .DS_Store
 prisma/*.db
+*.tsbuildinfo
