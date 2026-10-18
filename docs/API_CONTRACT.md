@@ -1,32 +1,54 @@
-# UI integration contract
+# API contract
 
-All API responses are JSON. Errors: `{error:string}`. Private APIs require a session cookie. Writes same origin. No production fixture data. UI may fetch authenticated APIs client-side and show empty/loading/error states.
+All responses are JSON unless a download. Errors: `{error:string}` with an accurate status (400 validation, 401 unauthenticated, 403 origin/secret, 404, 409 not configured, 413, 422 unreadable input, 429 rate limited, 502 upstream). Every private route requires the session cookie; state-changing routes also check the request origin. A test enforces both.
 
-- GET /api/auth/session -> `{user:{id,email}|null, setupRequired:boolean}`
-- POST /api/auth/setup `{email,password,setupSecret}`; POST /api/auth/login `{email,password}`; POST /api/auth/logout `{}`.
-- GET /api/dashboard -> `{stats:{newJobs,highMatches,analyzed,activeProviders,applications,failures}, topJobs:Job[], recentJobs:Job[], providers:Provider[], recentRuns:Run[], usage:{analyses,cost}}`
-- GET /api/jobs supports `q,score,provider,company,location,remoteType,salaryMin,contractType,publishedDays,discoveredDays,status,sort,page`; sort score/newest/salary/company/published; returns `{jobs:Job[],total,page,pageSize}`.
-- POST /api/jobs manual normalized data `{title,companyName,location,descriptionClean,sourceUrl,applicationUrl?,remoteType?,contractType?,salaryMin?,salaryMax?}` -> Job.
-- GET /api/jobs/:id -> Job incl `sources`, `analyses`, `application` incl `history`.
-- POST /api/jobs/:id/analyze -> `{queued:true}`; POST /api/jobs/:id/save -> Application.
-- POST /api/jobs/:id/application `{status,notes?,salaryDiscussed?,contact?,nextAction?,nextActionDate?,interviewDates?}` -> Application.
-- POST /api/jobs/:id/documents `{kind:'cv'|'cover-letter',language:'fr'|'en'}` -> `{queued:true,taskId}`; GET /api/jobs/:id/documents -> `{documents:[{id,kind,language,markdown,createdAt}]}`. GET /api/documents/:id/export?format=md|html|pdf for downloads.
-- GET /api/applications -> `{applications:Application[]}` each includes `job`.
-- GET /api/profile -> `{profile:CandidateData,version:number,resumes:Resume[]}`; PUT /api/profile candidate object -> profile.
-- POST /api/resume/upload multipart `file` -> `{resume:{id,fileName,...},suggestions:CandidateData|null,extractionStatus:string}`; extraction can be queued, GET profile to refresh. Suggestions never overwrite profile. Full edited profile saved only by PUT.
-- GET /api/search/profiles -> `{profiles:SearchProfile[]}`; POST create; PUT /api/search/profiles/:id; DELETE same.
-- POST /api/search/run `{}` -> `{runId,status}`; GET /api/search/runs -> `{runs:Run[]}`.
-- GET /api/providers -> `{providers:Provider[]}`; PATCH /api/providers/:id `{enabled,maxJobs,rateLimitMs,config:{boards?:string[],urls?:string[],allowedHosts?:string[]},strategies?:string[]}`. Provider IDs greenhouse,lever,ashby,france_travail,generic,linkedin,indeed,hellowork,jobijoba,apec,wttj,cadremploi.
-- GET /api/settings -> `{ai:{provider,model,configured},limits:{maxAiAnalysesPerDay,maxLlmCostPerDay,aiMatchThreshold,maxJobsPerProvider,maxTotalJobsPerRun,notificationScoreThreshold},notifications:{emailEnabled,telegramEnabled},schedule:{cron,timezone},appUrl}`. PATCH `{notifications:{emailEnabled,telegramEnabled}}`.
-- GET /api/privacy/export downloads private JSON; DELETE /api/privacy `{confirmation:'DELETE MY DATA'}` removes personal profile/resumes/analyses/applications/documents and sessions.
+## Auth
 
-## Common shapes
+- `GET /api/auth/session` → `{user:{id,email}|null, setupRequired}`
+- `POST /api/auth/setup` `{email,password(12+),setupSecret}` (once; rate limited) · `POST /api/auth/login` `{email,password}` · `POST /api/auth/logout`
 
-Job: `id,title,companyName,location,remoteType,contractType,salaryMin:number|null,salaryMax:number|null,salaryCurrency,sourceUrl,applicationUrl,descriptionClean,matchScore:number|null,preliminaryScore:number|null,publishedAt,discoveredAt,status (ACTIVE/EXPIRED/REMOVED),sources:[{provider,sourceUrl}],application:{status,...}|null,analyses:[{result:Analysis,model,createdAt}]`.
-Analysis: `overallMatchScore,confidence,summary,dimensions:{roleMatch,skillsMatch,experienceMatch,industryMatch,locationMatch,compensationMatch,seniorityMatch,careerGrowthMatch}` each `{score,reasoning}`; `matchingSkills,missingSkills,transferableSkills,strongPoints,weakPoints,hardRequirementsMet,hardRequirementsMissing,potentialRedFlags,applicationRecommendation` (STRONG_APPLY/APPLY/MAYBE/SKIP).
-Provider: `id,name,enabled,supported,maxJobs,rateLimitMs,strategies,config,status,message,lastSuccessAt,jobsDiscovered,errorRate`.
-Run: `id,status,trigger,startedAt,completedAt,createdAt,providersAttempted,providersSuccessful,providersFailed,jobsDiscovered,jobsNew,jobsDuplicate,jobsAnalyzed,jobsHighMatch,errors,providerRuns`.
-Application: `id,jobId,status,notes,salaryDiscussed,contact,nextAction,nextActionDate,interviewDates,appliedAt,history:[{fromStatus,toStatus,createdAt}]`.
-Statuses: NEW,REVIEWED,SAVED,APPLY,APPLIED,RECRUITER_CONTACT,INTERVIEW,TECHNICAL_INTERVIEW,FINAL_INTERVIEW,OFFER,REJECTED,WITHDRAWN,ARCHIVED.
-CandidateData flat: `preferredName,location,workAuthorization,languages:string[],currentTitle,yearsExperience:number,targetRoles,secondaryRoles,targetIndustries,preferredCompanyTypes,seniorityLevels,coreSkills,secondarySkills,tools,technologies,certifications,locations:string[],maxCommuteKm:number|null,remote:boolean,hybrid:boolean,onsite:boolean,relocation:boolean,travelTolerance,minimumSalary:number|null,preferredSalary:number|null,currency,contractTypes:string[],excludedCompanies,excludedIndustries,excludedTitles,excludedKeywords,careerSummary,achievements:string[],careerGoals,strengths:string[],weaknesses:string[],desiredNextStep`.
-SearchProfile flat: `id,name,enabled,targetTitles:string[],alternativeTitles,keywords,excludedKeywords,locations,remotePreferences,salaryMin:number|null,contractTypes,seniority,datePostedWindow:number (days),providers:string[],minimumMatchScore:number`.
+## Dashboard and settings
+
+- `GET /api/dashboard` → `{stats:{total,newJobs,highMatches,saved,submitted,interviewing,upcomingInterviews,activeProviders,failures,lastSearchAt}, topJobs, recentJobs, providers, recentRuns, upcomingInterviews[], followUps[], usage:{analyses,cost,maxAnalyses,maxCost,configured}, threshold, setup:{profile,searchProfile,source,firstRun,ai,notifications}}`
+- `GET /api/settings` → `{ai:{provider,model,configured,missing[],fallbackModel}, limits, ceilings, notifications:{emailEnabled,telegramEnabled,minScore,maxPerDigest,emailAvailable,telegramAvailable}, schedule:{enabled,time,timezone}, appUrl}`
+- `PATCH /api/settings` `{notifications?:{emailEnabled,telegramEnabled,minScore,maxPerDigest}, schedule?:{enabled,time:"HH:MM",timezone}, ai?:{maxAnalysesPerDay,maxCostPerDay,matchThreshold}, limits?:{maxJobsPerProvider,maxTotalJobsPerRun}}` (all fields optional; values above the environment ceilings are capped on read)
+- `POST /api/settings/notifications/test` `{channel:"EMAIL"|"TELEGRAM"}` → `{sent:true}` or 502
+
+## Jobs
+
+- `GET /api/jobs` filters: `q, score (min rank score), provider, company, location, remoteType, salaryMin, contractType, status (application stage), publishedDays, discoveredDays, view (active|saved|dismissed|closed|all), sort (score|newest|published|freshness|salary|company), page, pageSize` → `{jobs:Job[],total,page,pageSize}`. Unknown values are ignored.
+- `POST /api/jobs` manual posting `{title,companyName,location?,descriptionClean,sourceUrl,applicationUrl?,remoteType?,contractType?,salaryMin?,salaryMax?}` → Job (scored)
+- `POST /api/jobs/import-url` `{url}` → `{imported:[{id,title,duplicate}]}`; 422 for restricted platforms or pages without structured data
+- `GET /api/jobs/:id` → Job with `sources`, `analyses`, `application{history}`
+- `POST /api/jobs/:id/save` (never downgrades progress) · `POST /api/jobs/:id/dismiss` `{dismissed}` · `POST /api/jobs/:id/analyze` (409 when AI is not configured)
+- `POST /api/jobs/:id/application` `{status,notes?,salaryDiscussed?,contact?,nextAction?,nextActionDate?,interviewDates?[]}` → Application
+- `POST /api/jobs/:id/documents` `{kind:"cv"|"cover-letter",language:"fr"|"en"}` → 202 `{queued,taskId}` (409 without AI) · `GET` → `{documents:[{id,kind,language,version,model,markdown,evidenceUsed,suggestedLearning,createdAt}]}`
+- `GET /api/documents/:id/export?format=md|html|pdf|docx`
+- `GET /api/applications` → `{applications:[Application with job]}`
+
+## Profile and resume
+
+- `GET /api/profile` → `{profile,version,resumes[]}` · `PUT /api/profile` (full reviewed profile; queues a re-score)
+- `POST /api/resume/upload` multipart `file` (PDF, DOCX, Markdown or text, ≤ 5 MB) → 202 `{resume,extractionStatus}`; statuses `QUEUED`, `PENDING_REVIEW`, `AI_NOT_CONFIGURED`, `EXTRACTION_FAILED`. Suggestions never overwrite the profile.
+- `GET /api/resume/:id/download` → the original upload
+
+## Search and sources
+
+- `GET|POST /api/search/profiles` · `PUT|DELETE /api/search/profiles/:id` (each change queues a re-score)
+- `POST /api/search/run` → 202 `{runId,status}` · `GET /api/search/runs` → `{runs:[Run with providerRuns]}`
+- `POST /api/internal/jobs/run` bearer `JOB_RUNNER_SECRET`, optional `Idempotency-Key` → 202; skipped when a run finished in the last 3 hours
+- `GET /api/providers` → `{providers:[Provider]}` · `PATCH /api/providers/:id` `{enabled,maxJobs,rateLimitMs,config:{boards[],urls[],allowedHosts[]}}` (board URLs are reduced to names; URLs must be HTTPS and in `allowedHosts`) · `POST /api/providers/:id/check` → `{status,detail}`
+
+## Privacy
+
+- `GET /api/privacy/export` · `DELETE /api/privacy` `{confirmation:"DELETE MY DATA"}`
+- `GET /api/health` → `{status,database}` (public)
+
+## Shapes
+
+Job: `id,title,companyName,location,remoteType,contractType,salaryMin,salaryMax,salaryCurrency,sourceUrl,applicationUrl,descriptionClean,rankScore,matchScore,preliminaryScore,matchLabel,matchDetails{score,label,confidence,components[{key,label,score,max,evidence[],gaps[],uncertain[]}],matchedSkills[{skill,evidence}],missingSkills[],transferableSkills[],blockers[],uncertain[],summary},publishedAt,discoveredAt,lastSeenAt,statusChangedAt,dismissedAt,status(ACTIVE|EXPIRED|REMOVED),sources[],application,analyses[]`.
+Analysis (AI): `overallMatchScore,confidence,summary,dimensions{roleMatch,skillsMatch,experienceMatch,industryMatch,locationMatch,compensationMatch,seniorityMatch,careerGrowthMatch},matchingSkills,missingSkills,transferableSkills,strongPoints,weakPoints,hardRequirementsMet,hardRequirementsMissing,potentialRedFlags,applicationRecommendation`.
+Provider: `id,name,enabled,supported,maxJobs,rateLimitMs,config,method,description,credentialsConfigured,status,message,lastSuccessAt,jobsDiscovered,errorRate`.
+Run: `id,status(QUEUED|RUNNING|FINISHED|FAILED),trigger,startedAt,completedAt,providersAttempted,providersSuccessful,providersFailed,jobsDiscovered,jobsNew,jobsDuplicate,jobsAnalyzed,jobsHighMatch,errors[{provider,code,message}],providerRuns[{provider,status,jobsDiscovered,errorMessage,durationMs,extractorStats}]`.
+Application statuses: `NEW,REVIEWED,SAVED,APPLY,APPLIED,RECRUITER_CONTACT,INTERVIEW,TECHNICAL_INTERVIEW,FINAL_INTERVIEW,OFFER,REJECTED,WITHDRAWN,ARCHIVED`.
+CandidateData and SearchProfile: see `lib/schemas.ts`.

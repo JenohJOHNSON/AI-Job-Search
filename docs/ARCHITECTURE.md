@@ -1,46 +1,56 @@
 # Architecture
 
-A personal, single-account Next.js application and a separate Node.js worker share PostgreSQL. Railway runs both processes online. The browser never receives AI/provider credentials. Next.js route handlers authenticate every private request, validate input with Zod and call services using Prisma. There is no request-time scraper execution.
+A personal, single-owner Next.js application and a separate Node.js worker share PostgreSQL. Railway runs both processes online. The browser never receives AI or provider credentials. Next.js route handlers authenticate every private request, validate input with Zod and call services using Prisma. There is no request-time scraper execution: searches are queued and executed by the worker.
 
 ```mermaid
 flowchart TD
   Browser -->|HTTPS + revocable session| Web[Next.js UI and API]
-  Actions[GitHub Actions UTC cron] -->|Bearer runner secret| Web
+  Actions[GitHub Actions backup trigger] -->|Bearer runner secret| Web
   Web --> DB[(PostgreSQL)]
-  Worker[Durable background worker] --> DB
+  Worker[Worker: queue + scheduler + maintenance] --> DB
   Worker --> Registry[Independent provider adapters]
   Registry --> Normalize[Normalize and validate]
-  Normalize --> Dedup[URL / identity / fingerprint dedup]
-  Dedup --> Filter[Cheap hard filters and preliminary score]
-  Filter --> AI[Budgeted structured AI evaluation]
+  Normalize --> Score[Rule-based score + blockers]
+  Score --> Store[Deduplicate and store relevant jobs]
+  Store --> Reconcile[Coverage: removed / expired / reactivated]
+  Store --> AI[Budgeted structured AI refinement]
   AI --> DB
-  Worker --> Digest[One daily digest]
+  Worker --> Digest[Per-job notification reservation]
 ```
 
 ## Boundaries
 
-- `app`, `components`: accessible server/client rendering and route handlers.
-- `lib/schemas.ts`: validated candidate/search/job contracts shared by services.
-- `lib/services`: persistence, search orchestration, immutable resume review, application history, budget and notification policy.
-- `providers`: adapters and extraction strategies; no user, database or ranking logic.
+- `app`, `components`: accessible server/client rendering and route handlers. Route files only export handlers; logic lives in services.
+- `lib/schemas.ts`: validated candidate, search, job and provider-configuration contracts.
+- `lib/services`: `search` (run orchestration), `jobs` (ingestion, de-duplication, match persistence), `lifecycle` (removed/expired detection), `matching` (context and re-scoring), `queue`, `scheduler`, `settings`, `notifications`, `import`, `document-export`, `providers`, `usage` (AI budget).
+- `providers`: adapters and extraction strategies. No user, database or ranking logic. `board.ts` is the shared full-board crawler.
+- `matching`: pure functions: `score.ts` (engine), `knowledge.ts` (vocabulary, geography), `queries.ts` (title expansion).
 - `ai`: provider transport, structured schemas, untrusted-content isolation and grounding checks.
-- `matching`, `deduplication`: deterministic pure functions before paid semantic evaluation.
-- `workers`: PostgreSQL task claim/retry/lease processing independent of web lifecycle.
+- `workers`: queue loop, scheduler tick, maintenance and task processing, independent of the web lifecycle.
+
+## Search run
+
+1. A run and its task are created in one transaction (manual button, daily schedule, or the GitHub trigger). A partial unique index allows only one queued or running run.
+2. The worker claims the task (`FOR UPDATE SKIP LOCKED`, lease with ownership token). `processSearchRun` is idempotent: finished runs are skipped; a crashed run restarts cleanly.
+3. For each enabled provider (isolated try/catch): fetch → normalize → **score every listing** → keep those at or above the minimum score, best first, within per-source and per-run caps → ingest (URL/ID identity, canonical hash, guarded fingerprint and similarity de-duplication) → store the score and its evidence.
+4. Providers that enumerate a complete listing report **coverage** (a scope per board or page). Vacancies missing from a fully fetched scope are marked removed; an empty listing for a board that had openings is treated as a glitch. Search-based sources verify older offers directly. Passed `validThrough` dates expire jobs.
+5. If AI is configured, the best candidates are analysed in score order until the daily budget is reached; the result refines the ranking score but is capped by hard blockers.
+6. The run finishes `FINISHED` (at least one source succeeded) or `FAILED` with diagnostics; a digest task is queued after success.
 
 ## Reliability
 
-Task claims use PostgreSQL `FOR UPDATE SKIP LOCKED`. Leases have ownership tokens: stale workers cannot complete or retry tasks claimed by a replacement. Heartbeats renew leases; hard deadlines stop hung work. Stages are bounded and safe to retry. A partial unique index permits only one queued/running SearchRun. Jobs and posting sources have uniqueness constraints. Provider exceptions are recorded individually; a run completes even if a provider fails. AI errors leave collected jobs intact and retriable. Digest identity is recipient/channel/local calendar day; delivery uncertainty is surfaced instead of promising exactly-once email delivery.
+Task leases have ownership tokens: a stale worker cannot complete or retry a task claimed by a replacement. Heartbeats renew leases; retries back off exponentially to a final failure. The worker loop survives database outages. Provider exceptions are recorded per provider and never stop the run. Unexpected errors are retried by the queue before the run is declared failed. Queue SQL compares timestamps explicitly in UTC. Maintenance deletes expired sessions and old finished tasks and fails runs whose task is no longer active. The scheduler is idempotent (`scheduled:<local date>` key) so any number of workers or restarts create one run per day.
 
-## Data and scoring
+## Data
 
-CandidateProfile and SearchProfile are separate; profile version and job content hashes key analyses. A canonical Job owns multiple JobPostingSource records. The application tracker belongs to the canonical record and survives a source disappearance. No scheduled deletion of application jobs. Optional salary data never becomes zero or invented compensation. Only likely matches pass to schema-validated evaluation, and deterministic hard blockers cannot be overridden by an LLM. Candidate facts and untrusted job text are separate data in a no-tools AI request; inferred CV fields require explicit review.
+`CandidateProfile` (versioned) and `SearchProfile` are separate. A canonical `Job` owns many `JobPostingSource` rows (provider, source id, URL, scope, `removedAt`). Application tracking belongs to the canonical job and survives a source disappearing. `Job.rankScore` is what the interface sorts and notifies on; see [MATCHING.md](MATCHING.md). `JobNotification` (unique per job and channel) guarantees a job is announced once. `Resume` keeps the original bytes. `GeneratedDocument` is versioned. Owner-editable settings are `SystemSetting` rows validated against environment ceilings.
 
 ## Security and cost
 
-Personal-account setup requires a deployment bootstrap secret. Passwords use scrypt and sessions use random tokens stored only as hashes. Same-origin mutation checks, HTTP-only secure cookies in production, rate limits and service-level authentication protect API routes. Arbitrary fetches validate protocol, DNS/private ranges and every redirect, with bounded bodies and timeouts. Scraped markup is converted to inert plain text; documents are never executed. Uploads are size/type/magic checked and parsed in a bounded subprocess. Secrets and CVs are not logged.
+Owner setup requires a deployment secret and is serialised with an advisory lock. Passwords use scrypt; sessions are random tokens stored only as hashes. Same-origin mutation checks, HTTP-only (secure in production) cookies and in-process rate limits protect the API; a test asserts every route authenticates. Outbound fetches to user-supplied hosts validate protocol, DNS and every redirect, cap bytes and time, and honour robots.txt. Scraped markup is converted to inert text. Uploads are checked by size, type and signature and parsed in a bounded worker thread.
 
-Daily usage reservations occur under a database lock before each model request, including retries and document generation. Explicit model price configuration determines conservative reservations; unknown pricing disables paid calls. The user configures a model and key. Limits are application estimates and complement provider-account billing limits.
+AI usage reservations occur under a database lock before each request (including retries and document generation), using the exact configured token prices; unknown prices disable paid calls. The owner can lower limits in Settings but never exceed the environment ceilings.
 
 ## Deployment
 
-A multi-stage Docker build produces a non-root image. Run the web service with Railway PORT and a distinct worker service from the same image. Run committed Prisma migrations once before web deployment. PostgreSQL retains all durable state. GitHub Actions calls `/api/internal/jobs/run` using JOB_RUNNER_SECRET and an idempotency key. Daily cron is expressed in UTC; Europe/Paris is UTC+1 in winter and UTC+2 in summer. See README for operations and verified delivery status.
+A multi-stage Docker build produces non-root `web` and `worker` images from the same source. Railway runs both plus PostgreSQL; both run committed Prisma migrations on start. See [DEPLOYMENT.md](DEPLOYMENT.md).
