@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import PDFDocument from "pdfkit";
 import { job, owner, rememberSession, signIn } from "./support";
 
 // One continuous owner journey: each step builds on the previous one, exactly as a real user would.
@@ -47,6 +48,10 @@ test("the profile is saved, survives a reload, and a CV can be uploaded and down
   await expect(page.getByText("cv.txt")).toBeVisible();
   const download = await page.request.get(await page.getByRole("link", { name: /Original/ }).first().getAttribute("href") ?? "");
   expect(download.ok()).toBe(true); expect(await download.text()).toContain("Synthetic test CV");
+  const pdf = await new Promise<Buffer>(resolve => { const document = new PDFDocument(); const chunks: Buffer[] = []; document.on("data", chunk => chunks.push(chunk as Buffer)); document.on("end", () => resolve(Buffer.concat(chunks))); document.text("Synthetic PDF CV. Data engineer: SSIS, SQL Server, Python."); document.end(); });
+  await page.locator('input[type=file]').setInputFiles({ name: "cv.pdf", mimeType: "application/pdf", buffer: pdf });
+  await page.getByRole("button", { name: "Upload" }).click();
+  await expect(page.getByText("cv.pdf")).toBeVisible();
   const rejected = await page.request.post("/api/resume/upload", { multipart: { file: { name: "evil.pdf", mimeType: "application/pdf", buffer: Buffer.from("MZ not a pdf") } }, headers: { origin: new URL(page.url()).origin } });
   expect(rejected.status()).toBe(400);
 });

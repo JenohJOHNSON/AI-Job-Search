@@ -1,16 +1,28 @@
 import { Worker } from "node:worker_threads";
 
 // Untrusted documents are parsed in a short-lived worker thread with a memory cap and a hard timeout, so a malformed or
-// hostile file can only kill that thread, never the web process. `pdf-parse/lib/pdf-parse.js` is required directly because
-// the package entry point runs a debug routine that reads a test file when it has no parent module.
+// hostile file can only kill that thread, never the web process. PDFs use the maintained pdf.js "legacy" build (no canvas,
+// eval and font loading disabled); DOCX uses mammoth. The page count is bounded as well.
 const source = `
 const { parentPort, workerData } = require("node:worker_threads");
+const path = require("node:path");
+const { pathToFileURL } = require("node:url");
+async function pdfText(data) {
+  const entry = path.join(path.dirname(require.resolve("pdfjs-dist/package.json")), "legacy", "build", "pdf.mjs");
+  const pdfjs = await import(pathToFileURL(entry).href);
+  const document = await pdfjs.getDocument({ data: new Uint8Array(data), isEvalSupported: false, useSystemFonts: false, disableFontFace: true, verbosity: 0 }).promise;
+  let text = "";
+  for (let number = 1; number <= Math.min(document.numPages, 100); number++) {
+    const content = await (await document.getPage(number)).getTextContent();
+    text += content.items.map(item => (item.str || "") + (item.hasEOL ? "\\n" : " ")).join("") + "\\n";
+  }
+  await document.destroy();
+  return text;
+}
 (async () => {
   try {
     const data = Buffer.from(workerData.data);
-    let text;
-    if (workerData.kind === "pdf") text = (await require("pdf-parse/lib/pdf-parse.js")(data, { max: 100 })).text;
-    else text = (await require("mammoth").extractRawText({ buffer: data })).value;
+    const text = workerData.kind === "pdf" ? await pdfText(data) : (await require("mammoth").extractRawText({ buffer: data })).value;
     parentPort.postMessage({ ok: true, text });
   } catch (error) { parentPort.postMessage({ ok: false, error: String((error && error.message) || error) }); }
 })();`;
