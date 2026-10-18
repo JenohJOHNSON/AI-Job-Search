@@ -8,3 +8,6 @@ uploads/
 .DS_Store
 prisma/*.db
 *.tsbuildinfo
+playwright-report/
+test-results/
+e2e/.session.json

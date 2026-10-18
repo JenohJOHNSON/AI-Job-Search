@@ -80,7 +80,8 @@ function requiredYears(job: NormalizedJob) {
 function jobLevel(foldedTitle: string, foldedText: string) {
   if (/\b(stage|stagiaire|intern|internship|alternance|alternant|apprenti|apprentissage|apprenticeship|working student|werkstudent)\b/.test(foldedTitle)) return -1;
   if (/\b(junior|jr|debutant|entry level|graduate|jeune diplome)\b/.test(foldedTitle)) return 0;
-  if (/\b(head of|directeur|director|vp|chief|responsable|manager|management)\b/.test(foldedTitle) && !/product|project|data|analyst/.test(foldedTitle.replace(/manager/, ""))) return 3;
+  if (/\b(head of|directeur|directrice|director|vp|vice president|chief|cto|cio)\b/.test(foldedTitle)) return 3;
+  if (/\b(responsable|manager|management)\b/.test(foldedTitle) && !/product|project|data|analyst|account|program/.test(foldedTitle.replace(/manager/g, ""))) return 3;
   if (/\b(senior|sr|confirme|experimente|lead|principal|staff|expert|architect|architecte)\b/.test(foldedTitle)) return 2;
   if (/\b(junior|debutant)\b/.test(foldedText.slice(0, 600))) return 0;
   return 1;
@@ -208,7 +209,7 @@ export function scoreJob(candidate: CandidateData, job: NormalizedJob, profiles:
 
   // 3. Experience / seniority
   const expC = component("experience", "Experience & seniority", 10);
-  const years = candidate.yearsExperience; const known = years > 0; const need = requiredYears(job); const level = jobLevel(foldedTitle, foldedDescription);
+  let seniorityCeiling = 100; const years = candidate.yearsExperience; const known = years > 0; const need = requiredYears(job); const level = jobLevel(foldedTitle, foldedDescription);
   const interestInEntry = candidate.contractTypes.some(type => ["internship", "apprenticeship"].includes(contractKind(type) ?? ""));
   if (level === -1 && !interestInEntry) { blockers.push("Internship or apprenticeship, which your profile does not seek"); expC.gaps.push("Internship / apprenticeship position."); }
   if (!known) { expC.score = expC.max * 0.5; expC.uncertain.push("Years of experience are not set in your profile."); if (need !== null) expC.uncertain.push(`Posting asks for about ${need}+ years.`); }
@@ -216,7 +217,7 @@ export function scoreJob(candidate: CandidateData, job: NormalizedJob, profiles:
     const gap = need - years; expC.score = expC.max * (gap <= 0 ? 1 : gap <= 1 ? 0.75 : gap <= 2 ? 0.45 : 0.15);
     if (gap <= 0) expC.evidence.push(`${years} years of experience meets the ${need}+ requested.`); else expC.gaps.push(`Posting asks for ${need}+ years; your profile states ${years}.`);
   } else {
-    const diff = level - candidateLevel(years); expC.score = expC.max * (level === -1 ? 0.2 : diff === 0 ? 1 : diff < 0 ? 0.8 : diff === 1 ? 0.6 : 0.25);
+    const diff = level - candidateLevel(years); if (diff >= 2) { expC.gaps.push("The role is two or more seniority levels above your stated experience."); seniorityCeiling = 60; } expC.score = expC.max * (level === -1 ? 0.2 : diff === 0 ? 1 : diff < 0 ? 0.8 : diff === 1 ? 0.6 : 0.25);
     if (diff === 0) expC.evidence.push("Seniority looks consistent with your experience."); else if (diff > 0) expC.gaps.push("Posting looks more senior than your stated experience."); else expC.uncertain.push("Posting may be more junior than your experience.");
     expC.uncertain.push("No explicit experience requirement was found.");
   }
@@ -311,6 +312,7 @@ export function scoreJob(candidate: CandidateData, job: NormalizedJob, profiles:
   const raw = components.reduce((sum, item) => sum + item.score, 0);
   const uniqueBlockers = unique(blockers);
   let score = Math.round(clamp(raw, 0, 100));
+  score = Math.min(score, seniorityCeiling);
   if (uniqueBlockers.length) score = Math.min(score, 35);
   for (const item of components) { item.score = round1(item.score); globalUncertain.push(...item.uncertain); }
   const withEvidence = components.filter(item => item.evidence.length > 0).length;

@@ -15,7 +15,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migrate": "prisma migrate deploy",
-    "db:dev": "prisma migrate dev"
+    "db:dev": "prisma migrate dev",
+    "e2e": "node scripts/with-services.mjs npx playwright test",
+    "test:integration": "vitest run tests/integration",
+    "smoke:live": "node scripts/with-services.mjs node scripts/smoke.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",
@@ -40,7 +43,9 @@
     }
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@eslint/eslintrc": "3.2.0",
+    "@playwright/test": "1.64.1",
     "@tailwindcss/postcss": "4.1.17",
     "@types/node": "22.10.2",
     "@types/nodemailer": "6.4.17",

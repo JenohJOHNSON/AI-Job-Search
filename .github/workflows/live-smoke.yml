@@ -1,0 +1,35 @@
+name: Live provider smoke test
+# Manual only: performs one bounded, polite request to a few PUBLIC job boards (no credentials) through the real
+# web service and worker, then checks persistence, scoring, de-duplication and the tracking workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      boards:
+        description: 'JSON of boards, e.g. {"greenhouse":["doctolib"],"lever":["scaleway"],"ashby":["alan"]}'
+        required: false
+        default: '{"greenhouse":["dataiku"],"lever":["scaleway"],"ashby":["ledger"]}'
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: elan_smoke }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/elan_smoke
+      APP_URL: http://localhost:3000
+      NEXTAUTH_SECRET: 01234567890123456789012345678901
+      SETUP_SECRET: 0123456789012345
+      JOB_RUNNER_SECRET: 012345678901234567890123
+      SMOKE_BOARDS: ${{ inputs.boards }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run db:migrate
+      - run: npm run build
+      - run: npm run smoke:live

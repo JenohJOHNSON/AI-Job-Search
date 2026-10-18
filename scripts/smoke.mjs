@@ -7,7 +7,7 @@ try { process.loadEnvFile?.(); } catch { /* no .env file */ }
 const base = (process.env.BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
 const email = process.env.SMOKE_EMAIL ?? "smoke-owner@example.test";
 const password = process.env.SMOKE_PASSWORD ?? "smoke-test-password-123";
-const boards = JSON.parse(process.env.SMOKE_BOARDS ?? JSON.stringify({ lever: ["mistral"], greenhouse: ["doctolib"], ashby: ["ledger"] }));
+const boards = JSON.parse(process.env.SMOKE_BOARDS ?? JSON.stringify({ lever: ["scaleway"], greenhouse: ["doctolib", "dataiku"], ashby: ["alan"] }));
 let cookie = "";
 let failures = 0;
 
@@ -55,6 +55,7 @@ for (let attempt = 0; attempt < 90 && !finished; attempt++) {
 check("worker finished the run", finished?.status === "FINISHED", finished ? `${finished.status}: discovered=${finished.jobsDiscovered} new=${finished.jobsNew} providers ok=${finished.providersSuccessful} failed=${finished.providersFailed}` : "timed out (is the worker running?)");
 if (finished) for (const providerRun of finished.providerRuns ?? []) console.log(`      ${providerRun.provider}: ${providerRun.status} jobs=${providerRun.jobsDiscovered} ${providerRun.errorMessage ?? ""}`);
 
+for (const id of Object.keys(boards)) { const checked = await call("POST", `/api/providers/${id}/check`); check(`provider ${id} connectivity check`, checked.status === 200 && ["HEALTHY", "DEGRADED"].includes(checked.data?.status), `${checked.data?.status}: ${String(checked.data?.detail ?? "").slice(0, 90)}`); }
 const jobs = await call("GET", "/api/jobs?sort=score"); check("jobs persisted and listed", jobs.status === 200 && jobs.data?.total > 0, `total=${jobs.data?.total ?? 0}`);
 const first = jobs.data?.jobs?.[0];
 if (first) {
@@ -63,5 +64,20 @@ if (first) {
   const again = await call("POST", "/api/search/run"); await new Promise(resolve => setTimeout(resolve, 15000));
   const after = await call("GET", "/api/jobs?sort=score"); check("a second run does not create duplicates", after.data?.total === jobs.data.total, `${jobs.data.total} -> ${after.data?.total} (run ${again.status})`);
 }
+if (first) {
+  check("every stored job has a 0-100 score, a label and an explanation", jobs.data.jobs.every(item => Number.isInteger(item.rankScore) && item.matchLabel && item.matchDetails?.components?.length === 8), `${jobs.data.jobs.length} jobs`);
+  check("blocked roles (internships) are not stored", !jobs.data.jobs.some(item => /(intern|stage|stagiaire|alternance)/i.test(item.title)));
+  const saved = await call("POST", `/api/jobs/${first.id}/save`); check("save creates a SAVED application", saved.data?.status === "SAVED");
+  await call("POST", `/api/jobs/${first.id}/application`, { status: "APPLIED", notes: "smoke note", nextAction: "Follow up", interviewDates: [new Date(Date.now() + 864e5).toISOString()] });
+  const again = await call("POST", `/api/jobs/${first.id}/save`); check("saving an applied job does not downgrade it", again.data?.status === "APPLIED", again.data?.status);
+  const dismissed = await call("POST", `/api/jobs/${jobs.data.jobs[1]?.id ?? first.id}/dismiss`, { dismissed: true }); check("dismiss works", Boolean(dismissed.data?.dismissedAt));
+  const dash = await call("GET", "/api/dashboard"); check("dashboard reports saved, submitted, interviews and setup", dash.status === 200 && dash.data.stats.submitted >= 1 && dash.data.stats.upcomingInterviews >= 1 && dash.data.setup.firstRun === true, JSON.stringify(dash.data?.stats));
+  const detail = await call("GET", `/api/jobs/${first.id}`); check("job detail carries the match explanation", detail.data?.matchDetails?.components?.length === 8);
+}
+const blocked = await call("POST", "/api/jobs/import-url", { url: "https://www.linkedin.com/jobs/view/1" }); check("restricted platforms are refused with guidance", blocked.status === 422 && /does not permit automated retrieval/.test(blocked.data?.error ?? ""), blocked.data?.error?.slice(0, 80));
+const settings = await call("GET", "/api/settings"); check("settings expose limits and ceilings", settings.status === 200 && settings.data.ceilings.maxLlmCostPerDay >= settings.data.limits.maxLlmCostPerDay);
+const patched = await call("PATCH", "/api/settings", { notifications: { minScore: 75 }, schedule: { time: "07:15" } }); check("settings are editable and validated", patched.data?.notifications?.minScore === 75 && patched.data?.schedule?.time === "07:15");
+check("invalid settings are rejected", (await call("PATCH", "/api/settings", { schedule: { time: "25:99" } })).status === 400);
+check("unknown job filters never cause a 500", (await call("GET", "/api/jobs?status=NOPE&score=abc&view=x")).status === 200);
 console.log(failures ? `\n${failures} check(s) failed.` : "\nAll smoke checks passed.");
 process.exit(failures ? 1 : 0);

@@ -61,6 +61,11 @@ describe("rule-based matching", () => {
     const cpp = candidateProfileSchema.parse({ ...candidate, targetRoles: ["C++ Developer"], coreSkills: ["C++"], locations: ["Nancy"] });
     expect(run({ title: "Ingénieur développement logiciel C++ (H/F)", location: "Vandœuvre-lès-Nancy", descriptionClean: "Développement en C++ moderne, CMake, Linux. 3 ans d'expérience. CDI." }, cpp).score).toBeGreaterThanOrEqual(65);
   });
+  it("caps roles two or more seniority levels above the candidate's experience", () => {
+    const director = run({ title: "Director of Data Engineering", location: "Metz", descriptionClean: strongDescription.replace("Au moins 3 ans d'expérience. ", "") });
+    expect(director.score).toBeLessThanOrEqual(60); expect(component(director, "experience").gaps.join(" ")).toContain("seniority levels");
+    expect(run({ title: "Senior Data Engineer", location: "Metz", descriptionClean: strongDescription.replace("Au moins 3 ans d'expérience. ", "") }).score).toBeGreaterThan(60);
+  });
   it("is deterministic", () => {
     const input = { title: "Data Engineer", location: "Metz", descriptionClean: strongDescription };
     expect(run(input)).toEqual(run(input));
