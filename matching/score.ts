@@ -249,7 +249,7 @@ export function scoreJob(candidate: CandidateData, job: NormalizedJob, profiles:
       if (km <= maxCommute) locC.evidence.push(`${jobPlace.name} is about ${km} km from your preferred ${nearest.place.name}${border}.`);
       else {
         locC.gaps.push(`${jobPlace.name} is about ${km} km from ${nearest.place.name}, beyond your ${maxCommute} km limit${border}.`);
-        if (style.type !== "HYBRID" && !candidate.relocation) blockers.push(`On-site location ${jobPlace.name} is outside your commute range`);
+        if ((style.type !== "HYBRID" || km > maxCommute * 1.6) && !candidate.relocation) blockers.push(`On-site location ${jobPlace.name} is outside your commute range`); // hybrid still needs regular presence, so only remote roles ignore distance
         else if (candidate.relocation) locC.score = Math.max(locC.score, locC.max * 0.5);
       }
       if (style.type === "HYBRID" && !candidate.hybrid) { locC.score -= 3; locC.gaps.push("Hybrid work is not enabled in your profile."); }
