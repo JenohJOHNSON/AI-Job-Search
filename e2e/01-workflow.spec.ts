@@ -86,7 +86,8 @@ test("a source can be configured, validated and left clearly unchecked offline",
 
 test("an imported posting is scored with evidence, can be saved, dismissed and restored", async ({ page }) => {
   await signIn(page); await page.goto("/jobs");
-  await page.getByText("Import a posting you found elsewhere").click();
+  // By role: the empty job list repeats this phrase, so a text match becomes ambiguous once the list has loaded.
+  await page.getByRole("heading", { name: "Import a posting you found elsewhere" }).click();
   await page.getByRole("tab", { name: "Paste the text" }).click();
   const panel = page.locator("details.panel");
   await panel.getByLabel("Title").fill(job.title); await panel.getByLabel("Company").fill(job.company); await panel.getByLabel("Location").fill(job.location);
