@@ -72,7 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build --target web -t elan-web .
-      - run: docker build --target worker -t elan-worker .
+      - run: docker build -f Dockerfile.worker -t elan-worker .
       - name: Web image applies migrations and reports healthy
         run: |
           docker run -d --name web --network host \

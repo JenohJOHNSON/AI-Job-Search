@@ -6,10 +6,9 @@ Target: **Railway** for the web service, the background worker and PostgreSQL; *
 
 | Artifact | Purpose |
 | --- | --- |
-| `Dockerfile` | Multi-stage build with non-root `web` (default, last stage) and `worker` targets. Both run `prisma migrate deploy` before starting. |
-| `railway.json` | Web service: Docker target `web`, health check `/api/health`, restart on failure. |
-| `railway.worker.json` | Worker service: Docker target `worker`, restart on failure. |
-| `prisma/migrations` | Additive migrations, applied automatically on every start. |
+| `Dockerfile` | Non-root web image (Next.js standalone server). Runs `prisma migrate deploy` before starting, through `DIRECT_URL` when set. |
+| `Dockerfile.worker` | Non-root background worker image. Never migrates; waits, retrying, until the web image has. |
+| `prisma/migrations` | Additive migrations, applied automatically when the web service starts. |
 | `.github/workflows/ci.yml` | Lint, types, unit and PostgreSQL tests, build, browser e2e, and a job that builds both images, boots the web image against PostgreSQL and checks `/api/health` and that the worker keeps running. |
 | `.github/workflows/daily-job-search.yml` | Optional backup trigger for the daily search. |
 | `.github/workflows/live-smoke.yml` | Manual live smoke test against public job boards. |
@@ -29,11 +28,12 @@ Target: **Railway** for the web service, the background worker and PostgreSQL; *
 ## 2. Railway
 
 1. **Project and database.** Create a Railway project and add the **PostgreSQL** service.
-2. **Web service.** *New → GitHub repo → this repository.* `railway.json` selects the `web` Docker target and `/api/health`.
-   - Variables: `DATABASE_URL` (reference the PostgreSQL service's connection URL), `SETUP_SECRET`, `JOB_RUNNER_SECRET`, plus any optional variables from `.env.example`.
-   - Generate a public domain, set its target port to **3000**, then set `APP_URL` to that exact HTTPS origin (no trailing slash) and redeploy. `APP_URL` is used for same-origin checks, so a wrong value makes every write return 403.
-3. **Worker service.** *New → GitHub repo → the same repository* again. In the service settings set **Config as Code** to `/railway.worker.json`. Give it the **same** variables (`DATABASE_URL`, secrets, AI and notification variables). It needs no domain and no port.
-4. **Order.** Both images run `prisma migrate deploy` on start; migrations are additive, so deploy order does not matter.
+2. **Web service.** *New → GitHub repo → this repository.* Railway detects the root `Dockerfile`. Railway's config-as-code files (`railway.json`) are deprecated, so everything below is a service setting or variable.
+   - Variables: `DATABASE_URL` (reference the PostgreSQL service's connection URL), `SETUP_SECRET`, `JOB_RUNNER_SECRET`, `PORT=3000`, plus any optional variables from `.env.example`. Railway runs health checks against `PORT`; without it they fail with *service unavailable* although the app is up.
+   - If `DATABASE_URL` goes through a transaction-mode pooler (a Neon host containing `-pooler`, PgBouncer), also set `DIRECT_URL` to the direct, non-pooled connection string. Migrations use it so that Prisma's migration lock is reliably released.
+   - Settings: health check path `/api/health`. Generate a public domain, set its target port to **3000**, then set `APP_URL` to that exact HTTPS origin (no trailing slash) and redeploy. `APP_URL` is used for same-origin checks, so a wrong value makes every write return 403.
+3. **Worker service.** *New → GitHub repo → the same repository* again. Add the variable `RAILWAY_DOCKERFILE_PATH=Dockerfile.worker` (Railway always builds a Dockerfile's last stage and has no target setting). Give it the **same** variables, most simply as references such as `${{<web service>.DATABASE_URL}}`. It needs no domain, no port and no `DIRECT_URL`.
+4. **Order.** Only the web service applies migrations. A worker that starts first logs `worker_loop_error` and retries with backoff until the schema is current, so deploy order does not matter.
 5. **Owner account.** Open the public URL. The first screen asks for email, a password (12+ characters) and the `SETUP_SECRET`. Choose a unique password. Only one owner can ever be created.
 6. **Optional backup trigger.** The worker already runs the daily search by itself (Settings → Daily search). To also trigger it from GitHub, add the repository secrets `APP_URL` (the public `https://` origin of the web service) and `JOB_RUNNER_SECRET` (the same value as in Railway) and run **Daily job search** once with *Run workflow*. Until both secrets exist the workflow skips with a warning instead of failing. Automated triggers are skipped when a search finished in the last three hours, so the two never produce duplicate runs.
 
@@ -64,7 +64,9 @@ The repository's own deployment checks that run without Railway: the CI `docker`
 | Symptom | Likely cause |
 | --- | --- |
 | Every action says “Origin rejected” | `APP_URL` does not equal the public HTTPS origin. |
+| Health check fails with *service unavailable* while the logs show `Ready` | `PORT=3000` missing on the web service, so Railway probes another port. |
 | Health check fails | `DATABASE_URL` wrong or database unreachable; check the web logs for the migration step. |
+| Web restarts with `P1002 … Timed out trying to acquire a postgres advisory lock` | Migrations run through a pooled URL and a migration lock was left held. Set `DIRECT_URL` (non-pooled) on the web service. As a stopgap, `PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK=1` on the web service is acceptable while it runs a single replica, because only the web service migrates. |
 | Setup says the secret is invalid | `SETUP_SECRET` differs between what you typed and the variable. |
-| Run stays queued | Worker service missing, crashed, or on another database. |
+| Run stays queued | Worker service missing, crashed, on another database, or built from `Dockerfile` instead of `Dockerfile.worker` (its logs then show Next.js starting). |
 | Digest never arrives | Channel not enabled in Settings, transport variables missing, or no new job above the threshold (each job is announced once). |
