@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const config: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: process.cwd(),
-  serverExternalPackages: ["pdfkit", "pdfjs-dist", "mammoth"],
+  serverExternalPackages: ["pdfkit", "pdfjs-dist", "mammoth", "imapflow", "mailparser"],
   poweredByHeader: false,
   experimental: { serverActions: { bodySizeLimit: "5mb" } },
   async headers() {

@@ -23,14 +23,19 @@ export function cleanText(value: string) {
 export function allowedHost(hostname: string, allowedHosts: string[]) { return allowedHosts.some(host => hostname === host || hostname.endsWith(`.${host}`)); }
 export const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
+/** Resolves a hostname and returns one address, refusing hosts that resolve to any private or reserved address. */
+async function publicAddress(hostname: string) {
+  const resolver = new Resolver(); const addresses = await resolver.resolve4(hostname).catch(() => []);
+  const address6 = await resolver.resolve6(hostname).catch(() => []); const resolved = [...addresses, ...address6];
+  if (!resolved.length || resolved.some(address => !publicIp(address))) throw new ProviderError("BLOCKED", "Host does not resolve exclusively to public addresses.", false);
+  return resolved[0]!;
+}
+
 export async function safePublicFetch(input: string, allowedHosts: string[], redirects = 0): Promise<{ body: string; url: string; status: number }> {
   if (redirects > 3) throw new ProviderError("NETWORK", "Too many redirects.", false);
   const url = new URL(input);
   if (url.protocol !== "https:" || url.username || url.password || !allowedHost(url.hostname, allowedHosts)) throw new ProviderError("BLOCKED", "URL is outside the configured public hosts.", false);
-  const resolver = new Resolver(); const addresses = await resolver.resolve4(url.hostname).catch(() => []);
-  const address6 = await resolver.resolve6(url.hostname).catch(() => []); const resolved = [...addresses, ...address6];
-  if (!resolved.length || resolved.some(address => !publicIp(address))) throw new ProviderError("BLOCKED", "Host does not resolve exclusively to public addresses.", false);
-  const selected = resolved[0]!;
+  const selected = await publicAddress(url.hostname);
   return new Promise((resolve, reject) => {
     const request = https.request(url, { method: "GET", headers: { "User-Agent": "ElanJobSearch/0.1 (+responsible-public-fetch)", Accept: "application/json,text/html;q=0.9" }, timeout: 15_000, lookup: (_host, _options, callback) => callback(null, selected, ipaddr.parse(selected).kind() === "ipv6" ? 6 : 4) }, response => {
       const status = response.statusCode ?? 0;
@@ -41,6 +46,25 @@ export async function safePublicFetch(input: string, allowedHosts: string[], red
     });
     request.on("timeout", () => request.destroy(new ProviderError("TIMEOUT", "Provider timed out.", true)));
     request.on("error", error => reject(error instanceof ProviderError ? error : new ProviderError("NETWORK", error.message, true)));
+    request.end();
+  });
+}
+
+/**
+ * Returns where a click-tracking link points by reading only its `Location` header: no body is read and the redirect is not
+ * followed, so the destination page itself is never requested. Returns null for anything that is not an allowed HTTPS redirect.
+ */
+export async function redirectTarget(input: string, allowedHosts: string[]): Promise<string | null> {
+  let url: URL; try { url = new URL(input); } catch { return null; }
+  if (url.protocol !== "https:" || url.username || url.password || !allowedHost(url.hostname, allowedHosts)) return null;
+  let selected: string; try { selected = await publicAddress(url.hostname); } catch { return null; }
+  return new Promise(resolve => {
+    const request = https.request(url, { method: "GET", headers: { "User-Agent": "ElanJobSearch/0.2 (+job-alert link resolution)" }, timeout: 10_000, lookup: (_host, _options, callback) => callback(null, selected, ipaddr.parse(selected).kind() === "ipv6" ? 6 : 4) }, response => {
+      const status = response.statusCode ?? 0; const location = response.headers.location; response.destroy();
+      try { resolve([301, 302, 303, 307, 308].includes(status) && location ? new URL(location, url).toString() : null); } catch { resolve(null); }
+    });
+    request.on("timeout", () => { request.destroy(); resolve(null); });
+    request.on("error", () => resolve(null));
     request.end();
   });
 }

@@ -19,6 +19,10 @@ const envSchema = z.object({
   AI_OUTPUT_PRICE_PER_MILLION: z.coerce.number().positive().optional(),
   FRANCE_TRAVAIL_CLIENT_ID: z.string().default(""),
   FRANCE_TRAVAIL_CLIENT_SECRET: z.string().default(""),
+  // Opt-in third-party scraping of job portals (LinkedIn, Indeed, HelloWork, Welcome to the Jungle); runs are billed to this Apify account.
+  APIFY_API_TOKEN: z.string().default(""),
+  // Read-only mailbox holding the portals' job-alert emails, e.g. imaps://user%40gmail.com:app-password@imap.gmail.com:993/INBOX
+  IMAP_URL: z.string().default("").refine(value => !value || /^imaps?:\/\/[^/]+@[^/]+/.test(value), "IMAP_URL must look like imaps://user:password@host:993/INBOX"),
   RESEND_API_KEY: z.string().default(""),
   SMTP_URL: optionalUrl,
   EMAIL_FROM: z.string().default(""),

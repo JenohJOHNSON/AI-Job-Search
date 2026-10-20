@@ -85,9 +85,11 @@ See [.env.example](.env.example). Notification switches, the daily schedule (def
 - **France Travail**: official OAuth API; searches use your titles (French and English variants) and the départements of your preferred places (Nancy → 54, Metz → 57, Grand Est, …); pages through results; withdrawn offers are detected by direct look-ups. It does not cover Luxembourg.
 - **Greenhouse, Lever, Ashby**: public job-board APIs, no credentials. You choose the employer boards. A suggested starter list of boards that were reachable on 2026-10-18 is offered in the UI; few companies in Nancy, Metz or Luxembourg publish public boards, so expect most of these to be Paris or remote-first employers.
 - **Company career pages**: HTTPS pages you list explicitly, with a matching host allow-list, robots.txt respected, private addresses refused and size/time limits.
-- **Restricted platforms** (LinkedIn, Indeed, HelloWork, Apec, Welcome to the Jungle, …): never fetched. Paste the posting with **Import a posting** and keep the original link as your application link.
+- **Job-alert emails** (LinkedIn, Indeed, HelloWork, Welcome to the Jungle): create alerts on those sites, give Élan read-only IMAP access to that mailbox (`IMAP_URL`, a Gmail app password works), and every posting listed in an alert is imported and scored. Free and within the portals' terms; alerts carry title, employer and place, not the full description.
+- **Paid portal scraping, opt-in** (LinkedIn, Indeed, HelloWork, Welcome to the Jungle): third-party [Apify](https://apify.com) actors run on your own Apify account (`APIFY_API_TOKEN`), from about $0.001 to $0.005 per job, capped per run by each source's limit. These portals' terms forbid automated collection, so each source stays disabled until you enable it, at your own risk. A posting found both ways is merged into one job.
+- **Other restricted platforms** (Apec, Cadremploi, Jobijoba): never fetched. Paste the posting with **Import a posting** and keep the original link as your application link.
 
-Élan does not bypass CAPTCHAs, logins, rate limits or robots rules. A blocked or changed source records a classified failure and the other sources continue. Read the [provider matrix](docs/PROVIDER_MATRIX.md) before enabling or adding a source; terms and APIs change.
+Élan itself does not bypass CAPTCHAs, logins, rate limits or robots rules; only the opt-in Apify sources delegate collection to a third party. A blocked or changed source records a classified failure and the other sources continue. Read the [provider matrix](docs/PROVIDER_MATRIX.md) before enabling or adding a source; terms and APIs change.
 
 ## Testing
 

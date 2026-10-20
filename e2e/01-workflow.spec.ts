@@ -81,7 +81,11 @@ test("a source can be configured, validated and left clearly unchecked offline",
   await greenhouse.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Greenhouse saved.")).toBeVisible();
   await page.reload(); await expect(page.locator(".provider-card", { has: page.getByRole("heading", { name: "Greenhouse" }) }).getByLabel(/Greenhouse board names/)).toHaveValue("doctolib");
-  await expect(page.getByText("LinkedIn")).toBeVisible();
+  // Portal scrapers are listed as opt-in paid sources and stay disabled until the owner enables them.
+  await expect(page.getByRole("heading", { name: "Paid scraping (opt-in)" })).toBeVisible();
+  const linkedin = page.locator(".provider-card", { has: page.getByRole("heading", { name: "LinkedIn" }) });
+  await expect(linkedin.getByText(/APIFY_API_TOKEN/)).toBeVisible();
+  await expect(linkedin.getByRole("switch", { name: "Enabled" })).not.toBeChecked();
 });
 
 test("an imported posting is scored with evidence, can be saved, dismissed and restored", async ({ page }) => {

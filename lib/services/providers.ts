@@ -15,7 +15,8 @@ export async function providerView() {
   const providers = await db.providerSetting.findMany({ include: { health: true }, orderBy: { name: "asc" } });
   return providers.map(provider => {
     const catalog = providerCatalog.find(item => item.id === provider.id);
-    return { ...provider, strategies: provider.strategies, config: provider.config, method: catalog?.method ?? "UNSUPPORTED", description: catalog?.description ?? "", credentialsConfigured: provider.id === "france_travail" ? Boolean(env.FRANCE_TRAVAIL_CLIENT_ID && env.FRANCE_TRAVAIL_CLIENT_SECRET) : true, status: !provider.enabled ? "DISABLED" : provider.health?.status ?? "DEGRADED", message: provider.health?.message ?? null, lastSuccessAt: provider.health?.lastSuccessAt ?? null, jobsDiscovered: provider.health?.jobsDiscovered ?? 0, errorRate: provider.health?.attemptCount ? provider.health.errorCount / provider.health.attemptCount : 0, health: undefined };
+    const credentialsConfigured = provider.id === "france_travail" ? Boolean(env.FRANCE_TRAVAIL_CLIENT_ID && env.FRANCE_TRAVAIL_CLIENT_SECRET) : provider.id === "email_alerts" ? Boolean(env.IMAP_URL) : catalog?.method === "APIFY" ? Boolean(env.APIFY_API_TOKEN) : true;
+    return { ...provider, strategies: provider.strategies, config: provider.config, method: catalog?.method ?? "UNSUPPORTED", description: catalog?.description ?? "", costPerJobUsd: catalog?.costPerJobUsd, credentialsConfigured, status: !provider.enabled ? "DISABLED" : provider.health?.status ?? "DEGRADED", message: provider.health?.message ?? null, lastSuccessAt: provider.health?.lastSuccessAt ?? null, jobsDiscovered: provider.health?.jobsDiscovered ?? 0, errorRate: provider.health?.attemptCount ? provider.health.errorCount / provider.health.attemptCount : 0, health: undefined };
   });
 }
 
