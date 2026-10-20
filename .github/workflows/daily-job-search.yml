@@ -14,9 +14,21 @@ jobs:
         env:
           APP_URL: ${{ secrets.APP_URL }}
           JOB_RUNNER_SECRET: ${{ secrets.JOB_RUNNER_SECRET }}
+        # `test a && test b` does not stop a `bash -e` script when `a` fails, so each check exits explicitly.
         run: |
-          test -n "$APP_URL" && test -n "$JOB_RUNNER_SECRET"
+          if [ -z "$APP_URL" ] && [ -z "$JOB_RUNNER_SECRET" ]; then
+            echo "::warning title=Backup trigger not configured::Add the APP_URL and JOB_RUNNER_SECRET repository secrets to enable it, or disable this workflow. Skipped."
+            exit 0
+          fi
+          if [ -z "$APP_URL" ] || [ -z "$JOB_RUNNER_SECRET" ]; then
+            echo "::error::Set both APP_URL and JOB_RUNNER_SECRET repository secrets; only one is set."
+            exit 1
+          fi
+          case "$APP_URL" in
+            https://*) ;;
+            *) echo "::error::APP_URL must be the public https:// origin of the web app, e.g. https://your-app.up.railway.app"; exit 1 ;;
+          esac
           curl --fail-with-body --retry 3 --retry-all-errors \
-            --request POST "$APP_URL/api/internal/jobs/run" \
+            --request POST "${APP_URL%/}/api/internal/jobs/run" \
             --header "Authorization: Bearer $JOB_RUNNER_SECRET" \
             --header "Idempotency-Key: github-${{ github.run_id }}-${{ github.run_attempt }}"
