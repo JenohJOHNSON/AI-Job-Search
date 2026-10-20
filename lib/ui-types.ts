@@ -31,7 +31,20 @@ export type Job = {
   publishedAt: string | null; discoveredAt: string; lastSeenAt?: string; statusChangedAt?: string | null; dismissedAt?: string | null; status: string;
   sources?: { provider: string; sourceUrl: string; removedAt?: string | null }[];
   application?: Application | null; analyses?: { result: Analysis; model: string; createdAt: string }[];
+  aiAverageScore?: number | null; scorings?: Scoring[];
 };
+export type Qualification = { requirement: string; status: 'met' | 'missing' | 'unclear'; evidence: string; verified: boolean };
+export type ModelAssessment = {
+  dimensions: Record<string, { score: number; reasoning: string }>; requiredQualifications: Qualification[]; preferredQualifications: Qualification[];
+  matchedSkills: string[]; missingInformation: string[]; summary: string; recommendation: string;
+};
+export type ScoringAttempt = { model: string; outcome: 'SCORED' | 'FAILED' | 'SKIPPED'; code?: string; message?: string; latencyMs: number; retry: number };
+export type ModelScore = {
+  slot: number; primaryModel: string; model: string | null; status: 'PENDING' | 'SCORED' | 'FAILED'; score: number | null; fallbackUsed: boolean;
+  attempts: ScoringAttempt[]; result: { assessment: ModelAssessment; computed: { score: number; weighted: number; missingRequired: number } } | null;
+  inputTokens: number; outputTokens: number; costUsd: number | null; latencyMs: number; error: string | null;
+};
+export type Scoring = { id: string; status: 'RUNNING' | 'COMPLETE' | 'PARTIAL' | 'FAILED'; averageScore: number | null; slotsPlanned: number; slotsScored: number; costUsd: number | null; inputTokens: number; outputTokens: number; error: string | null; createdAt: string; completedAt: string | null; scores: ModelScore[] };
 export type Provider = {
   id: string; name: string; enabled: boolean; supported: boolean; maxJobs: number; rateLimitMs: number;
   strategies: string[]; config: { boards?: string[]; urls?: string[]; allowedHosts?: string[] };
@@ -64,6 +77,7 @@ export type SearchProfile = {
 };
 export type Settings = {
   ai: { provider: string; model: string; configured: boolean; missing: string[]; fallbackModel: string };
+  scoring: { configured: boolean; keyConfigured: boolean; slots: { slot: number; models: string[] }[]; invalid: string[]; reasoningEffort: string };
   limits: { maxAiAnalysesPerDay: number; maxLlmCostPerDay: number; aiMatchThreshold: number; maxJobsPerProvider: number; maxTotalJobsPerRun: number; notificationScoreThreshold: number };
   ceilings: { maxAiAnalysesPerDay: number; maxLlmCostPerDay: number; maxJobsPerProvider: number; maxTotalJobsPerRun: number };
   notifications: { emailEnabled: boolean; telegramEnabled: boolean; minScore: number; maxPerDigest: number; emailAvailable: boolean; telegramAvailable: boolean };

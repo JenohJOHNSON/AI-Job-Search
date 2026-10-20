@@ -17,6 +17,7 @@
     "db:migrate": "prisma migrate deploy",
     "db:dev": "prisma migrate dev",
     "e2e": "node scripts/with-services.mjs npx playwright test",
+    "e2e:scoring": "node scripts/e2e-scoring.mjs",
     "test:integration": "vitest run tests/integration",
     "smoke:live": "node scripts/with-services.mjs node scripts/smoke.mjs"
   },

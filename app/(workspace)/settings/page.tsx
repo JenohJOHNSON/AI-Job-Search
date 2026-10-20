@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Download, Send, Trash2 } from 'lucide-react';
 import { Badge, Feedback, Field, Loading, PageHeading, Toggle } from '@/components/ui';
-import { api, errorMessage, humanize, useResource } from '@/lib/client';
+import { api, errorMessage, humanize, modelName, useResource } from '@/lib/client';
 import type { Settings } from '@/lib/ui-types';
 
 const zones = ['Europe/Paris', 'Europe/Luxembourg', 'Europe/Brussels', 'Europe/Berlin', 'Europe/London', 'UTC'];
@@ -28,15 +28,19 @@ export default function SettingsPage() {
   async function remove() {
     try { await api('/api/privacy', { method: 'DELETE', body: JSON.stringify({ confirmation }) }); location.href = '/login'; } catch (reason) { notify(errorMessage(reason), true); }
   }
-  const { ai, ceilings, notifications } = form;
+  const { ai, ceilings, notifications } = form; const scoring = form.scoring;
   return <>
     <PageHeading eyebrow="SETTINGS" title="Guardrails for a deliberate search." description="Secrets and hard spending ceilings come from the server environment. Everything below can be lowered or tuned here." action={<button className="button" disabled={busy === 'save'} onClick={save}>{busy === 'save' ? 'Saving…' : 'Save settings'}</button>} />
     <Feedback message={message || error} error={failed || Boolean(error)} />
     <div className="grid two">
-      <section className="panel"><div className="panel-head"><h2>AI matching</h2><Badge tone={ai.configured ? 'green' : 'amber'}>{ai.configured ? 'Configured' : 'Not configured'}</Badge></div><div className="panel-body section-stack">
-        <p style={{ margin: 0 }}><strong>{humanize(ai.provider)}</strong> · {ai.model || 'no model selected'}{ai.fallbackModel && ` · fallback ${ai.fallbackModel}`}</p>
-        {ai.configured ? <p className="table-secondary" style={{ margin: 0 }}>AI refines the rule-based score for the best candidates, within the limits below.</p> : <p className="table-secondary" style={{ margin: 0 }}>Scores and notifications work without AI, using the transparent rule-based engine. To add AI, set in the environment: <strong>{ai.missing.join(', ')}</strong>. Prices must match your exact model, and your provider account should have its own spend limit too.</p>}
-        <Field label={`Daily AI requests (max ${ceilings.maxAiAnalysesPerDay})`}><input type="number" min={0} max={ceilings.maxAiAnalysesPerDay} value={form.limits.maxAiAnalysesPerDay} onChange={event => patch('limits', { maxAiAnalysesPerDay: Number(event.target.value) })} /></Field>
+      <section className="panel"><div className="panel-head"><h2>AI matching</h2><Badge tone={ai.configured || scoring.configured ? 'green' : 'amber'}>{ai.configured || scoring.configured ? 'Configured' : 'Not configured'}</Badge></div><div className="panel-body section-stack">
+        <div><h3 className="settings-subhead">Multi-model job scoring (OpenRouter) <Badge tone={scoring.configured ? 'green' : 'amber'}>{scoring.configured ? 'Active' : scoring.keyConfigured ? 'No model configured' : 'Needs OPENROUTER_API_KEY'}</Badge></h3>
+          <ol className="slot-list">{scoring.slots.map(slot => <li key={slot.slot}><strong>{modelName(slot.models[0])}</strong> <code>{slot.models[0]}</code>{slot.models.length > 1 && <small>Fallbacks, in order: {slot.models.slice(1).map(model => `${modelName(model)} (${model})`).join(' → ')}</small>}</li>)}</ol>
+          {scoring.invalid.length > 0 && <p className="table-secondary" role="alert">Ignored malformed model IDs: {scoring.invalid.join(', ')}.</p>}
+          <p className="table-secondary" style={{ margin: 0 }}>Each job above the threshold is scored by every slot on the same rubric; the final score is the average of the valid answers. A model that is rate limited, unavailable, out of context or timed out is retried once when that can help, then replaced by its slot’s next fallback. Change the models with <code>AI_SCORING_SLOT_1</code>–<code>3</code> (comma-separated, primary first) and reasoning with <code>AI_SCORING_REASONING_EFFORT</code> (now {scoring.reasoningEffort}). Prices are read from OpenRouter.</p></div>
+        <div><h3 className="settings-subhead">CV extraction and documents</h3><p style={{ margin: 0 }}><strong>{humanize(ai.provider)}</strong> · {ai.model || 'no model selected'}{ai.fallbackModel && ` · fallback ${ai.fallbackModel}`}</p></div>
+        {ai.configured || scoring.configured ? <p className="table-secondary" style={{ margin: 0 }}>AI refines the rule-based score for the best candidates, within the limits below.{!ai.configured && <> CV extraction and document drafts additionally need: <strong>{ai.missing.join(', ')}</strong>.</>}</p> : <p className="table-secondary" style={{ margin: 0 }}>Scores and notifications work without AI, using the transparent rule-based engine. For multi-model scoring set <strong>OPENROUTER_API_KEY</strong>; for CV extraction and documents set <strong>{ai.missing.join(', ')}</strong>. Your provider account should have its own spend limit too.</p>}
+        <Field label={`Daily AI requests (max ${ceilings.maxAiAnalysesPerDay})`} hint="Every model call counts, so multi-model scoring uses one request per model and job."><input type="number" min={0} max={ceilings.maxAiAnalysesPerDay} value={form.limits.maxAiAnalysesPerDay} onChange={event => patch('limits', { maxAiAnalysesPerDay: Number(event.target.value) })} /></Field>
         <Field label={`Daily AI budget in USD (max ${ceilings.maxLlmCostPerDay})`}><input type="number" min={0} max={ceilings.maxLlmCostPerDay} step="0.1" value={form.limits.maxLlmCostPerDay} onChange={event => patch('limits', { maxLlmCostPerDay: Number(event.target.value) })} /></Field>
         <Field label={`Only analyse jobs scoring at least ${form.limits.aiMatchThreshold}`}><div className="range-row"><input type="range" min={0} max={100} step={5} value={form.limits.aiMatchThreshold} onChange={event => patch('limits', { aiMatchThreshold: Number(event.target.value) })} /><output>{form.limits.aiMatchThreshold}</output></div></Field>
       </div></section>

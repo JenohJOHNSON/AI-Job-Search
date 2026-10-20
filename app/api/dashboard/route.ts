@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser, routeError } from "@/lib/api";
-import { aiConfigured } from "@/lib/config";
+import { aiConfigured, scoringConfigured } from "@/lib/config";
 import { parisDate } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { jobInclude, serializeJob } from "@/lib/services/jobs";
@@ -40,9 +40,9 @@ export async function GET() {
     return NextResponse.json({
       stats: { total, newJobs, highMatches, saved, submitted: submittedCount, interviewing: interviewApps.filter(item => (interviewStages as readonly string[]).includes(item.status)).length, upcomingInterviews: upcomingInterviews.length, activeProviders: providers.filter(provider => provider.enabled).length, failures: failuresToday, lastSearchAt: lastRun?.completedAt ?? null },
       topJobs: topJobs.map(job => withLabel(serializeJob(job))), recentJobs: recentJobs.map(job => withLabel(serializeJob(job))), providers, recentRuns, upcomingInterviews, followUps: followUps.map(item => ({ applicationId: item.id, jobId: item.job.id, title: item.job.title, companyName: item.job.companyName, nextAction: item.nextAction, nextActionDate: item.nextActionDate })),
-      usage: { analyses: usage._count, cost: Number(usage._sum.estimatedCost ?? 0), maxAnalyses: settings.ai.maxAnalysesPerDay, maxCost: settings.ai.maxCostPerDay, configured: aiConfigured() },
+      usage: { analyses: usage._count, cost: Number(usage._sum.estimatedCost ?? 0), maxAnalyses: settings.ai.maxAnalysesPerDay, maxCost: settings.ai.maxCostPerDay, configured: aiConfigured() || scoringConfigured() },
       threshold: settings.notifications.minScore,
-      setup: { profile: Boolean(profile?.success && (profile.data.targetRoles.length || profile.data.coreSkills.length)), searchProfile: searchProfileCount > 0, source: providers.some(provider => provider.enabled), firstRun: runCount > 0, ai: aiConfigured(), notifications: settings.notifications.emailEnabled || settings.notifications.telegramEnabled }
+      setup: { profile: Boolean(profile?.success && (profile.data.targetRoles.length || profile.data.coreSkills.length)), searchProfile: searchProfileCount > 0, source: providers.some(provider => provider.enabled), firstRun: runCount > 0, ai: aiConfigured() || scoringConfigured(), notifications: settings.notifications.emailEnabled || settings.notifications.telegramEnabled }
     });
   } catch (error) { return routeError(error); }
 }

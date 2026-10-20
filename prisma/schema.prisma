@@ -196,6 +196,8 @@ model Job {
   status             JobStatus @default(ACTIVE)
   preliminaryScore   Int?
   matchScore         Int?
+  // Exact mean of the multi-model AI scores (two decimals); matchScore holds it rounded.
+  aiAverageScore     Decimal? @db.Decimal(5, 2)
   rankScore          Int?
   matchDetails       Json?
   matchProfileVersion Int?
@@ -206,6 +208,7 @@ model Job {
   company            Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   sources            JobPostingSource[]
   analyses           JobAnalysis[]
+  scorings           JobScoring[]
   application        Application?
   documents          GeneratedDocument[]
   @@index([publishedAt])
@@ -260,6 +263,51 @@ model JobAnalysis {
   job                 Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
   @@unique([jobId, profileVersion, contentFingerprint])
   @@index([score])
+}
+
+// One multi-model scoring of a job. inputHash covers the rubric version and the exact candidate, preference and job data
+// sent to every model, so an unchanged job/profile combination is never scored twice.
+model JobScoring {
+  id            String   @id @default(cuid())
+  inputHash     String
+  rubricVersion Int
+  status        String   // RUNNING | COMPLETE | PARTIAL | FAILED
+  averageScore  Decimal? @db.Decimal(5, 2)
+  slotsPlanned  Int
+  slotsScored   Int      @default(0)
+  inputTokens   Int      @default(0)
+  outputTokens  Int      @default(0)
+  costUsd       Decimal  @default(0) @db.Decimal(12, 6)
+  error         String?
+  createdAt     DateTime @default(now())
+  completedAt   DateTime?
+  jobId         String
+  job           Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  scores        JobModelScore[]
+  @@unique([jobId, inputHash])
+  @@index([jobId, createdAt])
+}
+
+// The outcome of one scoring slot: at most one score, from the model that actually answered, plus every attempt made.
+model JobModelScore {
+  id             String   @id @default(cuid())
+  slot           Int
+  primaryModel   String
+  model          String?  // the model that produced the score (as reported by OpenRouter)
+  status         String   // PENDING | SCORED | FAILED
+  score          Int?
+  result         Json?
+  attempts       Json     @default("[]")
+  fallbackUsed   Boolean  @default(false)
+  inputTokens    Int      @default(0)
+  outputTokens   Int      @default(0)
+  costUsd        Decimal  @default(0) @db.Decimal(12, 6)
+  latencyMs      Int      @default(0)
+  error          String?
+  updatedAt      DateTime @updatedAt
+  scoringId      String
+  scoring        JobScoring @relation(fields: [scoringId], references: [id], onDelete: Cascade)
+  @@unique([scoringId, slot])
 }
 
 model Application {

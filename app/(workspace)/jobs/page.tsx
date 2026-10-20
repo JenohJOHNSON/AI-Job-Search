@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Bookmark, BookmarkCheck, ExternalLink, EyeOff, Link2, Plus, RotateCcw, Search } from 'lucide-react';
 import { EmptyState, Feedback, Field, JobState, Loading, PageHeading, Score, SourceBadges, Tabs } from '@/components/ui';
-import { ago, api, date, errorMessage, humanize, salary, useResource } from '@/lib/client';
+import { ago, api, date, errorMessage, humanize, providerName, salary, useResource } from '@/lib/client';
 import type { Job } from '@/lib/ui-types';
 
 type View = 'active' | 'saved' | 'dismissed' | 'closed' | 'all';
@@ -39,8 +39,8 @@ export default function JobsPage() {
         <div className="filters-wide">
           <Field label="Search"><div style={{ position: 'relative' }}><Search size={15} style={{ position: 'absolute', left: 10, top: 12 }} aria-hidden /><input style={{ paddingLeft: 32 }} value={search} onChange={event => setSearch(event.target.value)} placeholder="Title, employer or keyword" /></div></Field>
           <Field label="Minimum match"><select value={filters.score} onChange={event => update('score', event.target.value)}><option value="">Any</option><option value="80">Strong (80+)</option><option value="65">Good (65+)</option><option value="50">Possible (50+)</option></select></Field>
-          <Field label="Source"><select value={filters.provider} onChange={event => update('provider', event.target.value)}><option value="">All sources</option>{['france_travail', 'greenhouse', 'lever', 'ashby', 'generic', 'manual'].map(value => <option value={value} key={value}>{humanize(value)}</option>)}</select></Field>
-          <Field label="Sort by"><select value={filters.sort} onChange={event => update('sort', event.target.value)}><option value="score">Best match</option><option value="newest">Newest found</option><option value="published">Publication date</option><option value="freshness">Recently confirmed</option><option value="salary">Salary</option><option value="company">Employer</option></select></Field>
+          <Field label="Source"><select value={filters.provider} onChange={event => update('provider', event.target.value)}><option value="">All sources</option>{Object.entries(providerName).map(([value, name]) => <option value={value} key={value}>{name}</option>)}</select></Field>
+          <Field label="Sort by"><select value={filters.sort} onChange={event => update('sort', event.target.value)}><option value="score">Best match</option><option value="ai">AI average score</option><option value="newest">Newest found</option><option value="published">Publication date</option><option value="freshness">Recently confirmed</option><option value="salary">Salary</option><option value="company">Employer</option></select></Field>
         </div>
         <div className="filters-wide second">
           <Field label="Employer"><input value={filters.company} onChange={event => update('company', event.target.value)} /></Field>
@@ -59,12 +59,14 @@ export default function JobsPage() {
 
 function JobRow({ job, onAction }: { job: Job; onAction: (job: Job, action: 'save' | 'dismiss' | 'restore') => void }) {
   const closed = job.status !== 'ACTIVE'; const details = job.matchDetails; const saved = job.application && !['NEW', 'REVIEWED'].includes(job.application.status);
+  const scoring = job.scorings?.[0]; const models = job.aiAverageScore !== null && job.aiAverageScore !== undefined && scoring && (scoring.status === 'COMPLETE' || scoring.status === 'PARTIAL') ? scoring.slotsScored : 0;
   return <article className={`job-row ${job.dismissedAt || closed ? 'dim' : ''}`}>
-    <Score score={job.rankScore} ai={job.matchScore !== null} />
+    <Score score={job.rankScore} ai={job.matchScore !== null} models={models} />
     <div>
       <h3><Link className="job-title" style={{ maxWidth: 'none' }} href={`/jobs/${job.id}`}>{job.title}</Link></h3>
       <p>{job.companyName} · {job.location || 'Location not stated'} · {humanize(job.remoteType)} · {salary(job.salaryMin, job.salaryMax, job.salaryCurrency)}</p>
       <div className="job-meta"><SourceBadges job={job} /><JobState job={job} /><span className="table-secondary" style={{ margin: 0 }}>Published {date(job.publishedAt)} · found {ago(job.discoveredAt)} · confirmed {ago(job.lastSeenAt)}</span></div>
+      {job.aiAverageScore !== null && job.aiAverageScore !== undefined && <p className="why"><strong>AI average {job.aiAverageScore.toFixed(2)}</strong>{models ? ` from ${models} model${models === 1 ? '' : 's'}` : ''}{scoring?.status === 'PARTIAL' ? ` (reduced coverage: ${scoring.slotsScored} of ${scoring.slotsPlanned})` : ''}.{scoring?.status === 'RUNNING' ? ' Re-scoring now…' : ''}</p>}
       {details && <p className="why">{details.blockers.length ? <strong>Blocked: {details.blockers[0]}. </strong> : null}{details.components.flatMap(item => item.evidence).slice(0, 2).join(' ')}{details.missingSkills.length > 0 && <> <em>Missing: {details.missingSkills.slice(0, 3).join(', ')}.</em></>}</p>}
     </div>
     <div className="job-row-actions">

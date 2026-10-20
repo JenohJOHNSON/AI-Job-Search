@@ -37,7 +37,7 @@ Excluded keywords, companies, titles or industries from your profile and search 
 
 ## Stored data
 
-`Job.preliminaryScore` and `Job.matchDetails` hold the rule-based result and its evidence; `Job.matchScore` holds the AI score when present; `Job.rankScore` is what the interface sorts, filters and notifies on (the AI score, capped by blockers, else the rule-based score). `matchProfileVersion` records which profile version produced it.
+`Job.preliminaryScore` and `Job.matchDetails` hold the rule-based result and its evidence; `Job.matchScore` holds the AI score when present (with multi-model scoring, the rounded average; `Job.aiAverageScore` keeps it to two decimals, see [AI_SCORING.md](AI_SCORING.md)); `Job.rankScore` is what the interface sorts, filters and notifies on (the AI score, capped by blockers, else the rule-based score). `matchProfileVersion` records which profile version produced it.
 
 ## Semantic matching
 

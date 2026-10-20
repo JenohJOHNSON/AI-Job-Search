@@ -2,7 +2,7 @@ import type { CandidateData, NormalizedJob, SearchProfileData } from "@/lib/sche
 import { areaAliases, europeanCountryWords, languageAliases, nonEuropeWords, places, roleGroups, skills, type Place, type SkillDef } from "@/matching/knowledge";
 
 // Bump when scoring semantics change so stored results can be recomputed.
-export const MATCH_ENGINE_VERSION = 1;
+export const MATCH_ENGINE_VERSION = 2;
 
 export type MatchLabel = "STRONG" | "GOOD" | "POSSIBLE" | "LOW";
 export type MatchComponentKey = "title" | "skills" | "experience" | "location" | "language" | "salary" | "contract" | "keywords";
@@ -94,6 +94,25 @@ function inferRemote(job: NormalizedJob, foldedText: string): { type: Normalized
   if (/\b(hybride|hybrid|teletravail partiel|\d\s*jours? (?:de )?teletravail|jours? de teletravail|teletravail possible|teletravail \d|teletravail hybride|flex remote)\b/.test(foldedText)) return { type: "HYBRID", inferred: true };
   if (/\b(remote|teletravail|work from home|travail a distance)\b/.test(foldedText.slice(0, 1500)) && !/\b(no remote|pas de teletravail|sans teletravail|on site only|sur site uniquement)\b/.test(foldedText)) return { type: "HYBRID", inferred: true };
   return { type: "UNKNOWN", inferred: false };
+}
+
+export type WorkStyle = "REMOTE" | "HYBRID" | "ONSITE";
+const workStyleText: Record<WorkStyle, string> = { REMOTE: "Fully remote", HYBRID: "Hybrid", ONSITE: "On-site" };
+/** Reads a search profile's work-style choice ("remote", "Hybrid", "on-site", "télétravail"…) as one of the three styles. */
+export function workStyleOf(value: string): WorkStyle | null {
+  const folded = fold(value);
+  if (/\b(hybrid|hybride)\b/.test(folded)) return "HYBRID";
+  if (/\b(remote|teletravail|distance)\b/.test(folded)) return "REMOTE";
+  if (/\b(onsite|on site|sur site|presentiel|office)\b/.test(folded)) return "ONSITE";
+  return null;
+}
+/** The work styles the enabled search profiles accept, or null when any style is acceptable (no choice, or all three). */
+export function selectedWorkStyles(profiles: Pick<SearchProfileData, "remotePreferences">[]): Set<WorkStyle> | null {
+  if (!profiles.length) return null;
+  const choices = profiles.map(profile => new Set(profile.remotePreferences.map(workStyleOf).filter((style): style is WorkStyle => Boolean(style))));
+  if (choices.some(choice => choice.size === 0)) return null; // a profile without a choice accepts every style
+  const union = new Set(choices.flatMap(choice => [...choice]));
+  return union.size >= 3 ? null : union;
 }
 
 export function resolvePlace(foldedLocation: string): Place | null {
@@ -261,6 +280,13 @@ export function scoreJob(candidate: CandidateData, job: NormalizedJob, profiles:
     else { locC.score = 6; locC.gaps.push(`Location "${job.location}" is outside your preferred areas.`); }
   } else if (hasTerm(foldedLocation, "france") || !foldedLocation) { locC.score = 9; locC.uncertain.push("Only the country is stated, so the commute cannot be assessed."); if (style.type === "HYBRID") locC.score = 11; }
   else { locC.score = prefTexts.some(value => hasTerm(foldedLocation, value)) ? 18 : 5; if (locC.score < 10) locC.gaps.push(`Location "${job.location}" is not one of your preferred locations.`); else locC.evidence.push(`Location matches "${job.location}".`); if (outsideEurope) { blockers.push("Location is outside Europe"); locC.score = 0; } }
+  // Work styles chosen in the search profiles: a stated mismatch blocks the job; one only inferred from the text lowers the score.
+  const allowedStyles = selectedWorkStyles(profiles);
+  if (allowedStyles && style.type !== "UNKNOWN" && !allowedStyles.has(style.type)) {
+    const wanted = [...allowedStyles].map(item => workStyleText[item].toLowerCase()).join(" or ");
+    if (style.inferred) { locC.score -= 6; locC.gaps.push(`${workStyleText[style.type]} work${styleNote} is not among the work styles you selected (${wanted}).`); }
+    else { blockers.push(`${workStyleText[style.type]} work is not among your selected work styles (${wanted})`); locC.gaps.push(`${workStyleText[style.type]} work is not among the work styles you selected (${wanted}).`); }
+  } else if (allowedStyles && style.type !== "UNKNOWN") locC.evidence.push(`${workStyleText[style.type]} work matches the work styles you selected.`);
   locC.score = clamp(locC.score, 0, locC.max);
 
   // 5. Language & work authorization

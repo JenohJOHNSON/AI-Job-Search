@@ -1,13 +1,14 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { evaluateJob, extractProfile, generateDocument } from "@/ai";
-import { aiConfigured, config } from "@/lib/config";
+import { aiConfigured, config, scoringConfigured } from "@/lib/config";
 import { db } from "@/lib/db";
 import { candidateProfileSchema } from "@/lib/schemas";
 import { normalizedFromStored, saveMatch } from "@/lib/services/jobs";
 import { loadMatchingContext, rescoreJobs } from "@/lib/services/matching";
 import { sendDigest } from "@/lib/services/notifications";
 import { enqueueTask } from "@/lib/services/queue";
+import { scoreWithModels } from "@/lib/services/scoring";
 import { processSearchRun } from "@/lib/services/search";
 import { usageHooks } from "@/lib/services/usage";
 import { scoreJob } from "@/matching/score";
@@ -36,6 +37,8 @@ export async function processTask(type: string, payload: Prisma.JsonValue, meta:
     const [job, context] = await Promise.all([db.job.findUniqueOrThrow({ where: { id }, include: { sources: true } }), loadMatchingContext()]);
     if (!context) throw new Error("Candidate profile is required.");
     const normalized = normalizedFromStored(job); const rules = scoreJob(context.candidate, normalized, context.profiles);
+    // A failed multi-model scoring is stored with its reasons and is not retried by the queue: a retry would only repeat the cost.
+    if (scoringConfigured()) { await scoreWithModels(id, normalized, rules, context, { force: true }); return; }
     const analyzed = await evaluateJob(context.candidate, normalized, usageHooks, rules); const env = config();
     const data = { result: analyzed.result, score: analyzed.result.overallMatchScore, recommendation: analyzed.result.applicationRecommendation, confidence: analyzed.result.confidence, model: analyzed.usage.model, provider: env.AI_PROVIDER, inputTokens: analyzed.usage.inputTokens, outputTokens: analyzed.usage.outputTokens, estimatedCost: cost(analyzed.usage.inputTokens, analyzed.usage.outputTokens) };
     await db.jobAnalysis.upsert({ where: { jobId_profileVersion_contentFingerprint: { jobId: id, profileVersion: context.profileVersion, contentFingerprint: job.contentFingerprint } }, create: { jobId: id, profileVersion: context.profileVersion, contentFingerprint: job.contentFingerprint, ...data }, update: { ...data, createdAt: new Date() } });

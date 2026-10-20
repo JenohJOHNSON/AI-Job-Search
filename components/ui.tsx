@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { ArrowUpRight, BriefcaseBusiness, CircleAlert, CircleCheck, CircleHelp, LoaderCircle, Search, Sparkles, TriangleAlert } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { ago, date, humanize, providerName, salary } from '@/lib/client';
 import { labelFor, matchLabelText, type Job, type MatchComponent, type MatchDetails } from '@/lib/ui-types';
 
@@ -12,9 +12,32 @@ export function PageHeading({ eyebrow, title, description, action }: { eyebrow?:
 export function Badge({ children, tone = 'neutral', title }: { children: ReactNode; tone?: 'neutral' | 'green' | 'blue' | 'amber' | 'red'; title?: string }) { return <span className={`badge badge-${tone}`} title={title}>{children}</span>; }
 
 /** Transparent 0–100 score. The label is derived from the number, never invented separately. */
-export function Score({ score, compact = false, ai = false }: { score: number | null; compact?: boolean; ai?: boolean }) {
+export function Score({ score, compact = false, ai = false, models = 0 }: { score: number | null; compact?: boolean; ai?: boolean; models?: number }) {
   const label = labelFor(score); const tone = label === 'STRONG' ? 'green' : label === 'GOOD' ? 'blue' : label === 'POSSIBLE' ? 'amber' : 'neutral';
-  return <div className={`score score-${tone} ${compact ? 'score-compact' : ''}`} title={ai ? 'Refined by AI analysis' : 'Rule-based score from your reviewed profile'}><span className="score-value">{score === null ? '—' : score}<span className="sr-only"> out of 100</span></span><span className="score-label">{label ? matchLabelText[label] : 'Not scored'}{ai && ' · AI'}</span></div>;
+  const title = models ? `Average of ${models} AI model${models === 1 ? '' : 's'}` : ai ? 'Refined by AI analysis' : 'Rule-based score from your reviewed profile';
+  return <div className={`score score-${tone} ${compact ? 'score-compact' : ''}`} title={title}><span className="score-value">{score === null ? '—' : score}<span className="sr-only"> out of 100</span></span><span className="score-label">{label ? matchLabelText[label] : 'Not scored'}{models ? ` · AI ×${models}` : ai && ' · AI'}</span></div>;
+}
+
+export type CheckOption = { id: string; label: string; disabled?: boolean; note?: string };
+/**
+ * Multi-select checkboxes with a "Select all" box that reflects the enabled options: checked when all are selected,
+ * mixed when some are, empty when none. Disabled options are never changed by "Select all" and keep their state.
+ */
+export function CheckboxGroup({ legend, options, selected, onChange, hint, error }: { legend: string; options: CheckOption[]; selected: string[]; onChange: (next: string[]) => void; hint?: ReactNode; error?: string }) {
+  const enabled = options.filter(option => !option.disabled).map(option => option.id); const enabledSet = new Set(enabled);
+  const chosen = enabled.filter(id => selected.includes(id)).length; const all = enabled.length > 0 && chosen === enabled.length;
+  const allBox = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (allBox.current) allBox.current.indeterminate = chosen > 0 && !all; }, [chosen, all]);
+  const keepDisabled = selected.filter(id => !enabledSet.has(id));
+  const toggle = (id: string) => onChange(selected.includes(id) ? selected.filter(item => item !== id) : [...selected, id]);
+  const errorId = `${legend.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-error`;
+  return <fieldset className="checkbox-group" aria-describedby={error ? errorId : undefined}>
+    <legend>{legend} <span className="checkbox-count">{chosen} of {enabled.length} selected</span></legend>
+    <label className="check-row check-all"><input ref={allBox} type="checkbox" checked={all} disabled={!enabled.length} onChange={event => onChange(event.target.checked ? [...keepDisabled, ...enabled] : keepDisabled)} /><span>Select all</span></label>
+    <div className="check-options">{options.map(option => <label key={option.id} className={`check-row ${option.disabled ? 'is-disabled' : ''}`}><input type="checkbox" checked={selected.includes(option.id)} disabled={option.disabled} onChange={() => toggle(option.id)} /><span>{option.label}{option.note && <small>{option.note}</small>}</span></label>)}</div>
+    {error && <small className="check-error" id={errorId} role="alert">{error}</small>}
+    {hint && <small>{hint}</small>}
+  </fieldset>;
 }
 export function Feedback({ message, error = false }: { message: string; error?: boolean }) {
   if (!message) return null;
