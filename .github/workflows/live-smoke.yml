@@ -26,8 +26,8 @@ jobs:
       JOB_RUNNER_SECRET: "012345678901234567890123"
       SMOKE_BOARDS: ${{ inputs.boards }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run db:migrate
