@@ -6,7 +6,7 @@ Target: **Railway** for the web service, the background worker and PostgreSQL; *
 
 | Artifact | Purpose |
 | --- | --- |
-| `Dockerfile` | Non-root web image (Next.js standalone server). Runs `prisma migrate deploy` before starting, through `DIRECT_URL` when set. |
+| `Dockerfile` | Non-root web image (Next.js standalone server). `scripts/start-web.sh` runs `prisma migrate deploy` over a direct connection, then starts the server. |
 | `Dockerfile.worker` | Non-root background worker image. Never migrates; waits, retrying, until the web image has. |
 | `prisma/migrations` | Additive migrations, applied automatically when the web service starts. |
 | `.github/workflows/ci.yml` | Lint, types, unit and PostgreSQL tests, build, browser e2e, and a job that builds both images, boots the web image against PostgreSQL and checks `/api/health` and that the worker keeps running. |
@@ -30,7 +30,7 @@ Target: **Railway** for the web service, the background worker and PostgreSQL; *
 1. **Project and database.** Create a Railway project and add the **PostgreSQL** service.
 2. **Web service.** *New → GitHub repo → this repository.* Railway detects the root `Dockerfile`. Railway's config-as-code files (`railway.json`) are deprecated, so everything below is a service setting or variable.
    - Variables: `DATABASE_URL` (reference the PostgreSQL service's connection URL), `SETUP_SECRET`, `JOB_RUNNER_SECRET`, `PORT=3000`, plus any optional variables from `.env.example`. Railway runs health checks against `PORT`; without it they fail with *service unavailable* although the app is up.
-   - If `DATABASE_URL` goes through a transaction-mode pooler (a Neon host containing `-pooler`, PgBouncer), also set `DIRECT_URL` to the direct, non-pooled connection string. Migrations use it so that Prisma's migration lock is reliably released.
+   - Migrations need a direct (non-pooled) connection so that Prisma's migration lock is reliably released. With a Neon pooled `DATABASE_URL` (host containing `-pooler`) nothing is needed: the web image derives Neon's direct host by removing `-pooler`. With another transaction-mode pooler (PgBouncer), set `DIRECT_URL` to the direct connection string.
    - Settings: health check path `/api/health`. Generate a public domain, set its target port to **3000**, then set `APP_URL` to that exact HTTPS origin (no trailing slash) and redeploy. `APP_URL` is used for same-origin checks, so a wrong value makes every write return 403.
 3. **Worker service.** *New → GitHub repo → the same repository* again. Add the variable `RAILWAY_DOCKERFILE_PATH=Dockerfile.worker` (Railway always builds a Dockerfile's last stage and has no target setting). Give it the **same** variables, most simply as references such as `${{<web service>.DATABASE_URL}}`. It needs no domain, no port and no `DIRECT_URL`.
 4. **Order.** Only the web service applies migrations. A worker that starts first logs `worker_loop_error` and retries with backoff until the schema is current, so deploy order does not matter.
@@ -66,7 +66,7 @@ The repository's own deployment checks that run without Railway: the CI `docker`
 | Every action says “Origin rejected” | `APP_URL` does not equal the public HTTPS origin. |
 | Health check fails with *service unavailable* while the logs show `Ready` | `PORT=3000` missing on the web service, so Railway probes another port. |
 | Health check fails | `DATABASE_URL` wrong or database unreachable; check the web logs for the migration step. |
-| Web restarts with `P1002 … Timed out trying to acquire a postgres advisory lock` | Migrations run through a pooled URL and a migration lock was left held. Set `DIRECT_URL` (non-pooled) on the web service. As a stopgap, `PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK=1` on the web service is acceptable while it runs a single replica, because only the web service migrates. |
+| Web restarts with `P1002 … Timed out trying to acquire a postgres advisory lock` | Migrations run through a pooler that is not a Neon `-pooler` host, and a migration lock was left held. Set `DIRECT_URL` (non-pooled) on the web service. As a stopgap, `PRISMA_SCHEMA_DISABLE_ADVISORY_LOCK=1` on the web service is acceptable while it runs a single replica, because only the web service migrates. |
 | Setup says the secret is invalid | `SETUP_SECRET` differs between what you typed and the variable. |
 | Run stays queued | Worker service missing, crashed, on another database, or built from `Dockerfile` instead of `Dockerfile.worker` (its logs then show Next.js starting). |
 | Digest never arrives | Channel not enabled in Settings, transport variables missing, or no new job above the threshold (each job is announced once). |

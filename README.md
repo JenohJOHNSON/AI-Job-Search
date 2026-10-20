@@ -110,7 +110,7 @@ docker build -t elan-web .
 docker build -f Dockerfile.worker -t elan-worker .
 ```
 
-Both images are non-root and need the same environment and database. Only the web image applies migrations (`prisma migrate deploy`, through `DIRECT_URL` when set) before starting, and it exposes `/api/health`; the worker has no HTTP port and waits, retrying, until the schema is current.
+Both images are non-root and need the same environment and database. Only the web image applies migrations (`prisma migrate deploy` over a direct connection, see `scripts/start-web.sh`) before starting, and it exposes `/api/health`; the worker has no HTTP port and waits, retrying, until the schema is current.
 
 ## Deployment
 
