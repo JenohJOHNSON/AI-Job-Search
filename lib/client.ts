@@ -37,4 +37,11 @@ export const salary = (minimum: number | null, maximum: number | null, currency 
   return minimum !== null && maximum !== null ? `${format(minimum)} – ${format(maximum)}` : minimum !== null ? `From ${format(minimum)}` : `Up to ${format(maximum!)}`;
 };
 export const lines = (value: string) => value.split(/[,\n]/).map(item => item.trim()).filter(Boolean);
-
+export const ago = (value: string | null | undefined) => {
+  if (!value) return '—'; const minutes = Math.round((Date.now() - new Date(value).getTime()) / 60_000);
+  if (minutes < 2) return 'just now'; if (minutes < 60) return `${minutes} min ago`; const hours = Math.round(minutes / 60); if (hours < 36) return `${hours} h ago`; return `${Math.round(hours / 24)} d ago`;
+};
+/** datetime-local inputs use the browser's zone; the API stores ISO instants. */
+export const toLocalInput = (value: string | null | undefined) => { if (!value) return ''; const d = new Date(value); const pad = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+export const fromLocalInput = (value: string) => value ? new Date(value).toISOString() : null;
+export const providerName: Record<string, string> = { france_travail: 'France Travail', greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', generic: 'Career page', manual: 'Manual import' };

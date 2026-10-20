@@ -1,145 +1,150 @@
 # Élan
 
-Élan is a private, self-hosted recruiting agent for job seekers in France. It discovers real vacancies from configured official/public sources, merges duplicate postings, filters them against a reviewed candidate profile, optionally evaluates likely matches with a bounded AI budget, and keeps application history in one responsive dashboard.
+Élan is a private, self-hosted job-search agent for France and Europe. It discovers real vacancies from official or explicitly public sources, scores each one against your reviewed profile with a transparent rule-based engine (optionally refined by an AI model within hard spending limits), de-duplicates and tracks them, notifies you once about new strong matches, and keeps your whole application pipeline in one responsive workspace.
 
-The production architecture uses a Next.js web service, a separate durable worker and PostgreSQL. Railway can run both services from the same repository. GitHub Actions queues the daily job search, so no personal computer needs to stay online.
+It runs as three pieces that share PostgreSQL: a Next.js web app, an independent background worker, and an optional GitHub Actions backup trigger. Nothing needs your computer to stay on.
 
-## What is implemented
+The app starts empty. It never ships or invents vacancies, candidate facts or results.
 
-- Single-owner setup and login with scrypt password hashing, revocable hashed sessions, HTTP-only cookies and same-origin write checks.
-- Reviewed candidate profile, immutable uploaded resume records and AI extraction suggestions that never save themselves.
-- Multiple focused search profiles with bounded reusable queries.
-- Canonical jobs with multiple source records, URL/source identity checks, company/title/location hashes and description fingerprints.
-- Official/public Greenhouse, Lever, Ashby and France Travail adapters, plus explicit allowlisted schema.org company pages with SSRF and robots controls.
-- Explicitly unavailable LinkedIn, Indeed France, HelloWork, Jobijoba, Apec, Welcome to the Jungle and Cadremploi entries. Élan does not circumvent their access controls or current automated-extraction restrictions.
-- Deterministic prefiltering before schema-validated OpenAI, Anthropic, Gemini or OpenRouter analysis. No AI call occurs without an explicit model, key, exact price inputs and daily limits.
-- Job filters, evidence-rich detail pages, manual import, application Kanban/history, CV-tailoring suggestions and French/English cover letters with Markdown, HTML and PDF exports.
-- PostgreSQL task leases with ownership tokens, retry/backoff and recovery; provider failures remain isolated.
-- One idempotent daily email/Telegram digest, provider health, search-run history, structured logs and personal-data export/deletion.
+## What it does
 
-The app starts empty. It contains no fake production vacancies.
+| Area | Behaviour |
+| --- | --- |
+| Account | Single owner created with a one-time `SETUP_SECRET`; scrypt password hashes; revocable, hashed, HTTP-only sessions; same-origin checks; rate-limited login/setup/uploads. |
+| Profile | Reviewed candidate profile with a version number. CV upload (PDF, DOCX, Markdown, text) is parsed in a sandboxed worker thread; the original file is kept untouched. AI suggestions (when configured) are reviewed field by field and never applied automatically. |
+| Search profiles | Several focused searches (titles, related titles, places, keywords, exclusions, contract, salary floor, minimum score), with templates for data/integration, DevOps/C++ and analyst roles. French and English title variants are searched automatically. |
+| Sources | France Travail (official API), Greenhouse, Lever and Ashby (public job-board APIs) and explicitly allow-listed company pages with schema.org `JobPosting` data. LinkedIn, Indeed, HelloWork, Jobijoba, Apec, Welcome to the Jungle and Cadremploi are listed as unavailable and supported through manual or URL import only. |
+| Discovery | Whole boards are read, every vacancy is scored, relevant ones are stored; duplicates across sources are merged; vacancies that leave a board are marked removed or expired and come back if they reappear. |
+| Matching | 0–100 score with Strong / Good / Possible / Low labels, per-component evidence, missing and transferable skills, hard blockers. Works with no AI key. See [docs/MATCHING.md](docs/MATCHING.md). |
+| AI (optional) | OpenAI, Anthropic, Gemini or OpenRouter; schema-validated output, fingerprint caching, atomic daily request and cost reservations, no AI call without exact token prices. AI can refine a score but never lift a job past a hard blocker. |
+| Pipeline | Kanban with Saved, Applied, Recruiter contact, Interview, Offer, Rejected and Archived, drag and drop, notes, follow-ups, interview dates and activity history. |
+| Documents | Tailoring suggestions and cover letters in French or English, versioned, exported as Markdown, HTML, PDF and DOCX. Only facts from your reviewed profile are used; Élan never submits an application. |
+| Automation | PostgreSQL task queue with leases, retry/backoff and crash recovery; a built-in daily schedule (Europe/Paris aware); run history with per-source diagnostics. |
+| Notifications | Email (Resend or SMTP) and Telegram digests of genuinely new jobs above your threshold; each job is announced once per channel; test buttons in Settings. |
+| Privacy | JSON export of all personal data and permanent deletion of the account and every private record. Logs exclude CVs and secrets. |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
   Browser --> Web[Next.js web]
-  Actions[GitHub Actions] --> Web
+  Actions[GitHub Actions backup trigger] --> Web
   Web --> DB[(PostgreSQL)]
-  Worker --> DB
-  Worker --> Providers[Provider adapters]
-  Providers --> Dedupe[Normalize + deduplicate]
-  Dedupe --> Filter[Cheap filter]
-  Filter --> AI[Optional budgeted AI]
-  AI --> DB
-  Worker --> Digest[Daily digest]
+  Worker[Worker + scheduler] --> DB
+  Worker --> Sources[France Travail / Greenhouse / Lever / Ashby / company pages]
+  Sources --> Score[Normalize, deduplicate, rule-based score]
+  Score --> DB
+  Score --> AI[Optional budgeted AI]
+  Worker --> Digest[Email / Telegram digest]
 ```
 
-See [Architecture](docs/ARCHITECTURE.md), [implementation plan](docs/IMPLEMENTATION_PLAN.md), [provider matrix](docs/PROVIDER_MATRIX.md), [reference review](docs/REFERENCES.md), [API contract](docs/API_CONTRACT.md), and [provider guide](docs/ADDING_PROVIDER.md).
-
-## Technology
-
-Next.js 15 App Router, React 19, strict TypeScript, Tailwind CSS 4, Prisma 6, PostgreSQL 16, Zod 4 and a TypeScript worker. Redis and paid scraping services are unnecessary for the first production deployment.
+More detail: [Architecture](docs/ARCHITECTURE.md) · [Matching](docs/MATCHING.md) · [Deployment](docs/DEPLOYMENT.md) · [Provider matrix](docs/PROVIDER_MATRIX.md) · [API contract](docs/API_CONTRACT.md) · [Adding a provider](docs/ADDING_PROVIDER.md) · [Technical audit](docs/AUDIT.md).
 
 ## Quick start
 
 Requirements: Node.js 22 and PostgreSQL 16.
 
 ```bash
-cp .env.example .env
+cp .env.example .env        # set DATABASE_URL, APP_URL, SETUP_SECRET, JOB_RUNNER_SECRET
 npm install
 npm run db:migrate
-npm run dev
+npm run dev                 # web on http://localhost:3000
 ```
 
-In a second terminal, run the durable worker:
+In a second terminal run the worker. It reads `.env` itself:
 
 ```bash
 npm run worker
 ```
 
-Open `http://localhost:3000`. The first account requires the `SETUP_SECRET` from `.env`. Use a unique password of at least 12 characters. Then complete the candidate profile, create a search profile, configure a provider and select **Run job search**.
+Open `http://localhost:3000`, create the owner account with your `SETUP_SECRET`, then follow the checklist on the dashboard:
+
+1. **My profile**: target roles, skills, locations, languages, years of experience, work style, minimum salary (and optionally upload your CV).
+2. **Search profiles**: start from a template, adjust, save.
+3. **Job sources**: add Greenhouse, Lever or Ashby board names (paste the board URL if you like), or configure France Travail; run **Check connection**; enable the source.
+4. **Run job search**. The worker fetches, scores and stores vacancies; results appear under **Discover jobs**.
+
+Local development uses `next dev`, whose hot reload needs a relaxed Content-Security-Policy; use a production build (`npm run build && npm start`) to see exactly what ships.
 
 ## Environment variables
 
-Required variables are `DATABASE_URL`, `APP_URL`, `NEXTAUTH_SECRET` (32+ random characters), `SETUP_SECRET` (16+ characters) and a distinct `JOB_RUNNER_SECRET` (24+ characters).
+Required: `DATABASE_URL`, `APP_URL`, `SETUP_SECRET` (16+ characters), `JOB_RUNNER_SECRET` (24+ characters, different). `NEXTAUTH_SECRET` is no longer used and may be omitted.
 
-AI is optional. Configure `AI_PROVIDER`, `AI_MODEL`, the matching provider key, and both `AI_INPUT_PRICE_PER_MILLION` and `AI_OUTPUT_PRICE_PER_MILLION`. Price values must match the exact model and are deliberately not hardcoded because prices change. `AI_FALLBACK_MODEL` is optional. App reservations complement the provider account's own spend limit.
+| Group | Variables | Notes |
+| --- | --- | --- |
+| France Travail | `FRANCE_TRAVAIL_CLIENT_ID`, `FRANCE_TRAVAIL_CLIENT_SECRET` | Optional. Create an application at [francetravail.io](https://francetravail.io) and subscribe it to *Offres d'emploi v2*. Covers France only. |
+| AI | `AI_PROVIDER`, `AI_MODEL`, the matching `*_API_KEY`, `AI_INPUT_PRICE_PER_MILLION`, `AI_OUTPUT_PRICE_PER_MILLION`, `AI_FALLBACK_MODEL` | Optional. All of model, key and both prices are needed; prices are not hard-coded because they change. |
+| Email | `EMAIL_FROM`, `DIGEST_TO`, and `RESEND_API_KEY` **or** `SMTP_URL` | Optional. |
+| Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Optional. |
+| Ceilings | `MAX_AI_ANALYSES_PER_DAY` (30), `MAX_LLM_COST_PER_DAY` (2), `MAX_JOBS_PER_PROVIDER` (50), `MAX_TOTAL_JOBS_PER_RUN` (200), `AI_MATCH_THRESHOLD` (40), `NOTIFICATION_SCORE_THRESHOLD` (80), `SESSION_TTL_DAYS` (14), `TASK_LEASE_SECONDS` (300) | The owner can lower the AI and volume limits and set the notification threshold in **Settings**; stored values can never exceed these ceilings. |
 
-France Travail requires `FRANCE_TRAVAIL_CLIENT_ID` and `FRANCE_TRAVAIL_CLIENT_SECRET` from its partner API portal. ATS provider board slugs are configured in the dashboard and are not secrets.
+See [.env.example](.env.example). Notification switches, the daily schedule (default 06:30 Europe/Paris), the notification threshold and spending limits live in **Settings**, not in environment variables.
 
-Email supports Resend (`RESEND_API_KEY`) or `SMTP_URL`; both need `EMAIL_FROM` and `DIGEST_TO`. Telegram needs `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. Notification toggles remain off until explicitly enabled in Settings. Firecrawl, ScraperAPI and Apify keys are reserved in `.env.example`; no current code path uses or sends them.
+## Job sources
 
-Cost controls default to 30 AI requests, USD 2, 50 jobs per provider and 200 jobs per run. See `.env.example` for every limit.
+- **France Travail**: official OAuth API; searches use your titles (French and English variants) and the départements of your preferred places (Nancy → 54, Metz → 57, Grand Est, …); pages through results; withdrawn offers are detected by direct look-ups. It does not cover Luxembourg.
+- **Greenhouse, Lever, Ashby**: public job-board APIs, no credentials. You choose the employer boards. A suggested starter list of boards that were reachable on 2026-10-18 is offered in the UI; few companies in Nancy, Metz or Luxembourg publish public boards, so expect most of these to be Paris or remote-first employers.
+- **Company career pages**: HTTPS pages you list explicitly, with a matching host allow-list, robots.txt respected, private addresses refused and size/time limits.
+- **Restricted platforms** (LinkedIn, Indeed, HelloWork, Apec, Welcome to the Jungle, …): never fetched. Paste the posting with **Import a posting** and keep the original link as your application link.
 
-## Providers and scraping strategy
-
-Greenhouse, Lever and Ashby use documented public job-board endpoints. France Travail uses its official OAuth API. The generic adapter only reads user-configured HTTPS pages with schema.org `JobPosting`, checks every hostname/redirect against an allowlist, rejects private IP ranges, limits response size and observes robots rules.
-
-Élan does not store LinkedIn credentials or authentication cookies. It does not bypass CAPTCHAs, blocks or rate limits. A blocked or changed source records a classified health failure while other providers continue. Read [the current matrix](docs/PROVIDER_MATRIX.md) before enabling or extending a source; provider terms and APIs can change.
-
-## AI behavior
-
-Deterministic filters check exclusions, title, skills, location, work style, contract and stated salary before any model request. Candidate JSON and job text are supplied as separate data blocks under a no-tools system instruction. Output must pass a strict schema. Matching and transferable skills are then limited to skills already stored in the candidate profile. Analyses are cached by profile version and job content fingerprint.
-
-Resume extraction creates review suggestions. CV tailoring and cover letters may reorder or restate stored evidence, but must not invent experience, education, skills, achievements or numbers. Users should review every generated document.
-
-## Docker
-
-The Dockerfile has separate non-root `web` and `worker` targets:
-
-```bash
-docker build --target web -t elan-web .
-docker build --target worker -t elan-worker .
-```
-
-Both need the same environment and PostgreSQL. The web target reads Railway's `PORT`; the worker exposes no HTTP port.
-
-## Railway deployment
-
-1. Push this repository to GitHub.
-2. Create a Railway project and add PostgreSQL.
-3. Add a web service from the repository. Railway builds the root `Dockerfile`, whose last stage is `web` (server on `0.0.0.0:3000`). In the service settings set the healthcheck path to `/api/health`, and set the generated domain's target port to `3000`.
-4. Add the required environment variables. Set `DATABASE_URL` from the PostgreSQL service and `APP_URL` to the final HTTPS domain.
-5. The `web` and `worker` images run `prisma migrate deploy` before starting, so committed migrations are applied automatically against the configured Neon `DATABASE_URL`. If you prefer a manual first migration, run `npm run db:migrate` locally with the Neon URL before deploying.
-6. Add a second service from the same repository with the service variable `RAILWAY_DOCKERFILE_PATH=Dockerfile.worker` (Railway always builds a Dockerfile's last stage and has no target setting). Give it the same variables, e.g. as references such as `${{web.DATABASE_URL}}`. Without this worker, searches stay queued and never run.
-7. Deploy both services and verify `/api/health`, initial owner setup and that the worker is running.
-8. Add GitHub Actions secrets `APP_URL` and `JOB_RUNNER_SECRET`.
-9. Run **Daily job search** with `workflow_dispatch`, then verify the queued run and provider health in the dashboard.
-
-The daily workflow runs at 05:17 UTC. That is 06:17 in Paris in winter and 07:17 in summer. GitHub cron uses UTC and may start later during busy periods. If a constant Paris wall-clock time is essential, use two seasonal UTC schedules plus a timezone guard, or a Railway scheduler with explicit timezone support.
-
-Connecting GitHub and creating Railway resources require your account; this repository prepares those deployment artifacts but does not claim that an external deployment already exists.
+Élan does not bypass CAPTCHAs, logins, rate limits or robots rules. A blocked or changed source records a classified failure and the other sources continue. Read the [provider matrix](docs/PROVIDER_MATRIX.md) before enabling or adding a source; terms and APIs change.
 
 ## Testing
 
 ```bash
 npm run lint
 npm run typecheck
-npm test
+npm test                       # unit tests (offline); add TEST_DATABASE_URL to include the PostgreSQL integration tests
+TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/elan_test npm test
 npm run build
+npm run e2e                    # Playwright against a production build + worker (empty database)
+npm run smoke:live             # bounded live request to a few PUBLIC job boards (no credentials)
 ```
 
-Unit tests use synthetic, offline fixtures. PostgreSQL integration checks run in CI against a temporary service. Live provider smoke tests should be infrequent, bounded and executed only after reviewing current source terms.
+Unit and integration tests use synthetic fixtures that are kept clearly apart from production data. Browser tests use deterministic manual data, run axe-core accessibility scans on every page and check phone layouts. The live smoke test is manual by design (see `.github/workflows/live-smoke.yml`).
 
-## Screenshots
+## Docker
 
-Screenshots can be added here after the first deployed environment is populated with the owner's private search data. The repository does not ship synthetic jobs or fabricated dashboard results.
+```bash
+docker build -t elan-web .
+docker build -f Dockerfile.worker -t elan-worker .
+```
+
+Both images are non-root and need the same environment and database. Only the web image applies migrations (`prisma migrate deploy`, through `DIRECT_URL` when set) before starting, and it exposes `/api/health`; the worker has no HTTP port and waits, retrying, until the schema is current.
+
+## Deployment
+
+Railway (web + worker + PostgreSQL) and the GitHub Actions backup trigger are described step by step, with the exact external accounts and credentials involved, in **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. This repository prepares and tests the deployable artifacts; it does not claim that a deployment already exists.
+
+## Security and privacy
+
+- Authorization is enforced on every private route; a test fails the build if a route handler stops calling `requireUser()` or `assertSameOrigin()`.
+- Uploads are limited to 5 MB, checked by declared type and file signature, and parsed in a memory-capped, time-limited worker thread.
+- Outbound requests to user-supplied URLs resolve DNS first, refuse private and reserved addresses, validate every redirect, cap bytes and time, and honour robots.txt.
+- The Content-Security-Policy, `X-Content-Type-Options`, `Referrer-Policy` and `Permissions-Policy` headers are set for every response.
+- Secrets and CV contents are never logged. Never commit `.env`.
+- Remaining dependency advisories: `npm audit --omit=dev` reports 3 *moderate* findings (a ReDoS-style issue in `sprintf-js` pulled in by `mammoth`). Mammoth only ever runs inside the sandboxed parsing thread, so the impact is a bounded, time-limited failure of one upload.
+
+The operator is responsible for source terms, robots policies, rate limits and applicable French and EU law. Collect only public vacancy information needed for a personal search.
 
 ## Troubleshooting
 
-- A run stays queued: ensure the worker service uses the same `DATABASE_URL` and inspect its structured logs.
-- A provider is degraded with no jobs: verify its board slug/credentials, query terms and recorded extraction statistics. Zero results are not replaced with sample data.
-- AI remains disabled: provide a model, its key and both exact token prices. Check the provider account's own budget and rate limit.
-- The daily workflow receives 401: make the GitHub `JOB_RUNNER_SECRET` exactly match Railway.
-- Migration fails: verify the Railway PostgreSQL URL and run committed migrations before the new web process starts.
+- **A run stays queued**: the worker is not running or uses a different `DATABASE_URL`. Check its logs for `worker_started`.
+- **A run fails with “No job source is enabled”** or **“Create and enable at least one search profile”**: finish the dashboard checklist; the message says exactly what is missing.
+- **A source is degraded with no jobs**: use **Check connection** for the per-board result. A 404 means the board name is wrong; an empty board is reported as such rather than hidden.
+- **France Travail shows an authentication error**: the client id/secret are missing or the application is not subscribed to *Offres d'emploi v2*.
+- **AI stays off**: provide a model, its key and both token prices. Without them everything still works using rule-based scores.
+- **Digest not arriving**: enable the channel in Settings, check the transport variables, use the test button, and remember each job is announced only once.
+- **Daily search did not start**: the schedule needs a profile, an active search profile and an enabled source; see Settings.
 
-## Privacy and responsible operation
+## Known limitations
 
-Candidate data, resumes, analysis and application history require authentication. Secrets and CV contents are excluded from structured logs. The Privacy panel exports personal records and can delete the owner account and all related private data. Jobs are retained when sources disappear and application-related records remain until the owner deletes their data.
-
-The operator is responsible for source terms, robots policies, rate limits and applicable French/EU law. Collect only public vacancy information needed for a personal search, avoid unnecessary recruiter personal data and disable any source whose permitted access becomes unclear.
+- France Travail, AI providers, email and Telegram cannot be exercised without your credentials; they are covered by stubbed-network tests and were not run live here.
+- Luxembourg vacancies are only reachable through employers' public boards or manual import.
+- Scanned (image-only) PDFs are not read; export a text-based PDF or DOCX.
+- The in-process rate limiter assumes one web instance.
+- The rule-based matcher is keyword and knowledge-base driven (FR/EN synonyms, geography, skill families); it does not use embeddings.
 
 ## License
 
-Copyright 2026. Released under the MIT License; see `LICENSE`. Reference projects were studied as documented in `docs/REFERENCES.md`. No third-party source code was copied.
+Copyright 2026. Released under the MIT License; see `LICENSE`. Reference projects were studied as documented in `docs/REFERENCES.md`; no third-party source code was copied.

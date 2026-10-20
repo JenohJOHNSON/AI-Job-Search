@@ -2,7 +2,9 @@
   "name": "elan-job-search",
   "version": "0.1.0",
   "private": true,
-  "engines": { "node": ">=20.9" },
+  "engines": {
+    "node": ">=20.9"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
@@ -13,17 +15,21 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migrate": "prisma migrate deploy",
-    "db:dev": "prisma migrate dev"
+    "db:dev": "prisma migrate dev",
+    "e2e": "node scripts/with-services.mjs npx playwright test",
+    "test:integration": "vitest run tests/integration",
+    "smoke:live": "node scripts/with-services.mjs node scripts/smoke.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",
     "cheerio": "1.1.2",
+    "docx": "9.5.1",
     "ipaddr.js": "2.2.0",
     "lucide-react": "0.468.0",
     "mammoth": "1.12.2",
-    "next": "15.5.25",
-    "nodemailer": "10.0.1",
-    "pdf-parse": "1.1.1",
+    "next": "15.5.28",
+    "nodemailer": "10.1.2",
+    "pdfjs-dist": "4.10.38",
     "pdfkit": "0.15.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -31,19 +37,23 @@
     "zod": "4.1.12"
   },
   "overrides": {
-    "next": { "postcss": "8.5.23", "sharp": "0.35.4" }
+    "next": {
+      "postcss": "8.5.23",
+      "sharp": "0.35.5"
+    }
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@eslint/eslintrc": "3.2.0",
+    "@playwright/test": "1.64.1",
     "@tailwindcss/postcss": "4.1.17",
     "@types/node": "22.10.2",
     "@types/nodemailer": "6.4.17",
-    "@types/pdf-parse": "1.1.4",
     "@types/pdfkit": "0.13.5",
     "@types/react": "19.0.3",
     "@types/react-dom": "19.0.2",
     "eslint": "9.17.0",
-    "eslint-config-next": "15.5.25",
+    "eslint-config-next": "15.5.28",
     "prisma": "6.12.0",
     "tailwindcss": "4.1.17",
     "tsx": "4.19.2",

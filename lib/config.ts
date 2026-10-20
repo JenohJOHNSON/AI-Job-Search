@@ -4,7 +4,8 @@ const optionalUrl = z.string().url().optional().or(z.literal(""));
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   APP_URL: z.string().url().default("http://localhost:3000"),
-  NEXTAUTH_SECRET: z.string().min(32),
+  // Deprecated and unused: sessions are random server-side tokens stored hashed. Still validated when present so old deployments keep starting.
+  NEXTAUTH_SECRET: z.string().min(32).optional(),
   SETUP_SECRET: z.string().min(16),
   JOB_RUNNER_SECRET: z.string().min(24),
   AI_PROVIDER: z.enum(["openai", "anthropic", "gemini", "openrouter"]).default("openai"),

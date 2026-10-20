@@ -1,4 +1,6 @@
 name: Daily job search
+# Optional BACKUP trigger. The worker already runs the daily search by itself (Settings -> Daily search). Automated triggers are
+# skipped by the server when a search finished in the last three hours, so enabling both never creates duplicate runs.
 on:
   schedule:
     - cron: "17 5 * * *"

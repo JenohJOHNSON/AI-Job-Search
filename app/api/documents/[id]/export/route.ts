@@ -1,8 +1,19 @@
 import { NextRequest } from "next/server";
-import PDFDocument from "pdfkit";
 import { HttpError, requireUser, routeError } from "@/lib/api";
 import { db } from "@/lib/db";
+import { parseMarkdown, toDocx, toHtml, toPdf } from "@/lib/services/document-export";
 type Context = { params: Promise<{ id: string }> };
-const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!);
-async function pdfBuffer(markdown: string) { const document = new PDFDocument({ size: "A4", margins: { top: 48, bottom: 48, left: 52, right: 52 }, info: { Title: "Élan generated document" } }); const chunks: Buffer[] = []; document.on("data", chunk => chunks.push(chunk as Buffer)); document.font("Helvetica").fontSize(10).text(markdown, { lineGap: 3 }); document.end(); await new Promise<void>((resolve, reject) => { document.on("end", resolve); document.on("error", reject); }); return Buffer.concat(chunks); }
-export async function GET(request: NextRequest, context: Context) { try { const user = await requireUser(), { id } = await context.params; const document = await db.generatedDocument.findFirst({ where: { id, userId: user.id } }); if (!document) throw new HttpError(404, "Document not found."); const format = request.nextUrl.searchParams.get("format") ?? "md"; const base = `${document.kind}-${document.jobId}`.replace(/[^a-z0-9-]/gi, "_"); if (format === "html") { const html = `<!doctype html><html lang="${document.language}"><meta charset="utf-8"><title>${escape(document.kind)}</title><body><main style="max-width:48rem;margin:3rem auto;font:16px/1.5 system-ui;white-space:pre-wrap">${escape(document.markdown)}</main></body></html>`; return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8", "Content-Disposition": `attachment; filename="${base}.html"` } }); } if (format === "pdf") { const body = await pdfBuffer(document.markdown); return new Response(body, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${base}.pdf"` } }); } return new Response(document.markdown, { headers: { "Content-Type": "text/markdown; charset=utf-8", "Content-Disposition": `attachment; filename="${base}.md"` } }); } catch (error) { return routeError(error); } }
+const attachment = (name: string) => ({ "Content-Disposition": `attachment; filename="${name}"`, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+export async function GET(request: NextRequest, context: Context) {
+  try {
+    const user = await requireUser(), { id } = await context.params;
+    const document = await db.generatedDocument.findFirst({ where: { id, userId: user.id } });
+    if (!document) throw new HttpError(404, "Document not found.");
+    const format = request.nextUrl.searchParams.get("format") ?? "md"; const base = `${document.kind}-${document.language}-v${document.version}`.replace(/[^a-z0-9-]/gi, "_"); const blocks = parseMarkdown(document.markdown);
+    if (format === "html") return new Response(toHtml(blocks, document.language, document.kind), { headers: { "Content-Type": "text/html; charset=utf-8", ...attachment(`${base}.html`) } });
+    if (format === "pdf") return new Response(new Uint8Array(await toPdf(blocks)), { headers: { "Content-Type": "application/pdf", ...attachment(`${base}.pdf`) } });
+    if (format === "docx") return new Response(new Uint8Array(await toDocx(blocks)), { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ...attachment(`${base}.docx`) } });
+    if (format !== "md") throw new HttpError(400, "Unsupported format. Use md, html, pdf or docx.");
+    return new Response(document.markdown, { headers: { "Content-Type": "text/markdown; charset=utf-8", ...attachment(`${base}.md`) } });
+  } catch (error) { return routeError(error); }
+}

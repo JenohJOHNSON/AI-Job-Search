@@ -2,8 +2,9 @@
 # Background worker image for Railway. Railway builds the last stage of a Dockerfile and has no
 # build-target setting, so the worker service selects this file with the service variable
 #   RAILWAY_DOCKERFILE_PATH=Dockerfile.worker
-# It produces the same image as the "worker" target of ./Dockerfile, minus the Next.js build the
-# worker never uses. Keep the two in step.
+# This is the only worker image definition (./Dockerfile builds the web app only).
+# The worker does not run migrations: the web image applies them, and until the schema is current
+# the worker loop logs worker_loop_error and retries with backoff instead of exiting.
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -26,4 +27,4 @@ COPY --chown=elan:elan ai ./ai
 COPY --chown=elan:elan matching ./matching
 COPY --chown=elan:elan providers ./providers
 COPY --chown=elan:elan workers ./workers
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && exec ./node_modules/.bin/tsx workers/main.ts"]
+CMD ["./node_modules/.bin/tsx", "workers/main.ts"]

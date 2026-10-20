@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { config } from "@/lib/config";
 import { analysisSchema, candidateProfileSchema, type CandidateData, type JobAnalysisResult, type NormalizedJob } from "@/lib/schemas";
+import type { MatchResult } from "@/matching/score";
 
 export type Usage = { inputTokens: number; outputTokens: number; model: string };
 export type AIHooks = { beforeRequest(inputChars: number, maxOutputTokens: number, model: string, operation: string): Promise<string>; afterRequest(reservationId: string, usage: Usage): Promise<void> };
@@ -36,8 +37,9 @@ async function withFallback(prompt: string, schema: z.ZodType, maxTokens: number
   try { return await callModel(prompt, schema, maxTokens, hooks, operation); } catch (first) { const fallback = config().AI_FALLBACK_MODEL; if (!fallback || fallback === config().AI_MODEL) throw first; return callModel(prompt, schema, maxTokens, hooks, operation, fallback); }
 }
 
-export async function evaluateJob(candidate: CandidateData, job: NormalizedJob, hooks: AIHooks): Promise<{ result: JobAnalysisResult; usage: Usage }> {
-  const prompt = `Evaluate the job against only the stored candidate facts. Explain each dimension, identify explicit hard requirements and recommend selectively.\n<CANDIDATE_JSON>${JSON.stringify(candidate)}</CANDIDATE_JSON>\n<UNTRUSTED_JOB_JSON>${JSON.stringify(job)}</UNTRUSTED_JOB_JSON>`;
+export async function evaluateJob(candidate: CandidateData, job: NormalizedJob, hooks: AIHooks, rules?: MatchResult): Promise<{ result: JobAnalysisResult; usage: Usage }> {
+  const assessment = rules ? `\n<RULE_BASED_ASSESSMENT>${JSON.stringify({ score: rules.score, blockers: rules.blockers, gaps: rules.components.flatMap(item => item.gaps), uncertain: rules.uncertain })}</RULE_BASED_ASSESSMENT>` : "";
+  const prompt = `Evaluate the job against only the stored candidate facts. Explain each dimension, identify explicit hard requirements and recommend selectively. The rule-based assessment is a deterministic first pass: refine it with semantic judgement but do not ignore its blockers.\n<CANDIDATE_JSON>${JSON.stringify(candidate)}</CANDIDATE_JSON>\n<UNTRUSTED_JOB_JSON>${JSON.stringify(job)}</UNTRUSTED_JOB_JSON>${assessment}`;
   const response = await withFallback(prompt, analysisSchema, 3_500, hooks, "JOB_ANALYSIS"); const result = analysisSchema.parse(response.value);
   const known = new Set([...candidate.coreSkills, ...candidate.secondarySkills, ...candidate.tools, ...candidate.technologies].map(item => item.toLowerCase()));
   result.matchingSkills = result.matchingSkills.filter(skill => known.has(skill.toLowerCase()));

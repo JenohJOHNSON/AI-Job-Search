@@ -2,8 +2,16 @@ name: CI
 on:
   push:
   pull_request:
+
+env:
+  APP_URL: http://localhost:3000
+  NEXTAUTH_SECRET: "01234567890123456789012345678901"
+  SETUP_SECRET: "0123456789012345"
+  JOB_RUNNER_SECRET: "012345678901234567890123"
+
 jobs:
   verify:
+    name: Lint, types, unit and database tests, build
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -14,10 +22,7 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/elan_test
-      APP_URL: http://localhost:3000
-      NEXTAUTH_SECRET: 01234567890123456789012345678901
-      SETUP_SECRET: 0123456789012345
-      JOB_RUNNER_SECRET: 012345678901234567890123
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/elan_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,3 +33,59 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  e2e:
+    name: Browser end-to-end (production build + worker)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: elan_e2e }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/elan_e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run db:migrate
+      - run: npm run build
+      - run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with: { name: playwright-report, path: "playwright-report/\ntest-results/", retention-days: 7 }
+
+  docker:
+    name: Docker images boot and migrate
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: elan_docker }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target web -t elan-web .
+      - run: docker build -f Dockerfile.worker -t elan-worker .
+      - name: Web image applies migrations and reports healthy
+        run: |
+          docker run -d --name web --network host \
+            -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/elan_docker -e APP_URL -e NEXTAUTH_SECRET -e SETUP_SECRET -e JOB_RUNNER_SECRET -e PORT=3000 elan-web
+          for i in $(seq 1 40); do curl -fsS http://localhost:3000/api/health && ok=1 && break; sleep 2; done
+          docker logs web | tail -20
+          test "$ok" = 1
+      - name: Worker image starts and keeps polling
+        run: |
+          docker run -d --name worker --network host \
+            -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/elan_docker -e APP_URL -e NEXTAUTH_SECRET -e SETUP_SECRET -e JOB_RUNNER_SECRET elan-worker
+          sleep 15
+          docker logs worker | tail -20
+          docker logs worker | grep -q worker_started
+          if docker logs worker 2>&1 | grep -q -E 'worker_loop_error|worker_crashed|scheduler_failed'; then echo 'worker reported errors'; exit 1; fi
+          test "$(docker inspect -f '{{.State.Running}}' worker)" = true

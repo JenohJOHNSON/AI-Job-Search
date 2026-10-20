@@ -63,6 +63,7 @@ enum ErrorCode {
   PARSER_CHANGED
   BLOCKED
   AUTH
+  NOT_FOUND
   NETWORK
   AI_PROVIDER
   DATABASE
@@ -111,6 +112,7 @@ model Resume {
   size             Int
   contentHash      String
   sourceText       String
+  original         Bytes?
   extractionStatus String   @default("PENDING_REVIEW")
   suggestions      Json?
   createdAt        DateTime @default(now())
@@ -194,6 +196,12 @@ model Job {
   status             JobStatus @default(ACTIVE)
   preliminaryScore   Int?
   matchScore         Int?
+  rankScore          Int?
+  matchDetails       Json?
+  matchProfileVersion Int?
+  lastSeenAt         DateTime @default(now())
+  statusChangedAt    DateTime?
+  dismissedAt        DateTime?
   companyId          String?
   company            Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   sources            JobPostingSource[]
@@ -207,6 +215,9 @@ model Job {
   @@index([normalizedTitle])
   @@index([status])
   @@index([contentFingerprint])
+  @@index([rankScore])
+  @@index([lastSeenAt])
+  notifications      JobNotification[]
 }
 
 model JobPostingSource {
@@ -220,11 +231,14 @@ model JobPostingSource {
   rawPayload    Json?
   firstSeenAt   DateTime @default(now())
   lastSeenAt    DateTime @default(now())
+  scope         String?
+  removedAt     DateTime?
   jobId         String
   job           Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
   @@unique([provider, sourceJobId])
   @@unique([sourceUrl])
   @@index([provider])
+  @@index([provider, scope])
   @@index([jobId])
 }
 
@@ -392,6 +406,10 @@ model GeneratedDocument {
   kind      String
   language  String
   markdown  String
+  version   Int @default(1)
+  model     String?
+  evidenceUsed Json?
+  suggestedLearning Json?
   createdAt DateTime @default(now())
   userId    String
   user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -409,7 +427,21 @@ model Notification {
   externalId     String?
   error          String?
   createdAt      DateTime @default(now())
-  @@unique([channel, recipientHash, calendarDate])
+  jobs           JobNotification[]
+  @@index([channel, calendarDate])
+}
+
+// One row per job and channel: a job is announced at most once, even across digests and retries.
+model JobNotification {
+  id             String @id @default(cuid())
+  channel        String
+  status         String @default("PENDING")
+  createdAt      DateTime @default(now())
+  jobId          String
+  job            Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  notificationId String?
+  notification   Notification? @relation(fields: [notificationId], references: [id], onDelete: SetNull)
+  @@unique([jobId, channel])
 }
 
 model SystemSetting {
