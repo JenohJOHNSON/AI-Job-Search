@@ -22,7 +22,8 @@ export async function ingestJob(job: NormalizedJob, seenAt = new Date()) {
   const canonicalHash = canonicalJobHash(job.companyName, job.title, job.location); const fingerprint = contentFingerprint(job.descriptionClean);
   const exact = await db.jobPostingSource.findFirst({ where: { OR: [{ sourceUrl: job.sourceUrl }, { provider: job.source, sourceJobId: job.sourceJobId }] }, include: { job: true } });
   if (exact) {
-    const materiallyChanged = exact.job.contentFingerprint !== fingerprint;
+    // A job-alert email only summarises a posting, so it must never replace a full description seen elsewhere.
+    const materiallyChanged = exact.job.contentFingerprint !== fingerprint && !job.extractor.startsWith("email_alert");
     const [, updated] = await db.$transaction([
       db.jobPostingSource.update({ where: { id: exact.id }, data: sourceData(job, seenAt) }),
       db.job.update({ where: { id: exact.job.id }, data: { lastSeenAt: seenAt, ...(exact.job.status === "REMOVED" ? { status: "ACTIVE", statusChangedAt: seenAt } : {}), expiresAt: job.expiresAt ? new Date(job.expiresAt) : exact.job.expiresAt, ...(materiallyChanged ? { descriptionRaw: job.descriptionRaw, descriptionClean: job.descriptionClean, contentFingerprint: fingerprint, publishedAt: job.publishedAt ? new Date(job.publishedAt) : exact.job.publishedAt } : {}) } })

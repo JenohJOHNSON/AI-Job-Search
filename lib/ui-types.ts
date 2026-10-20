@@ -35,7 +35,7 @@ export type Job = {
 export type Provider = {
   id: string; name: string; enabled: boolean; supported: boolean; maxJobs: number; rateLimitMs: number;
   strategies: string[]; config: { boards?: string[]; urls?: string[]; allowedHosts?: string[] };
-  method?: string; description?: string; credentialsConfigured?: boolean;
+  method?: string; description?: string; credentialsConfigured?: boolean; costPerJobUsd?: number;
   status: string; message: string | null; lastSuccessAt: string | null; jobsDiscovered: number; errorRate: number;
 };
 export type Run = {

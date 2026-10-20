@@ -6,7 +6,8 @@ const defaults: Record<string, string> = {
   SETUP_SECRET: "0123456789012345",
   JOB_RUNNER_SECRET: "012345678901234567890123",
   FRANCE_TRAVAIL_CLIENT_ID: "test-client",
-  FRANCE_TRAVAIL_CLIENT_SECRET: "test-secret"
+  FRANCE_TRAVAIL_CLIENT_SECRET: "test-secret",
+  APIFY_API_TOKEN: "test-apify-token"
 };
 for (const [key, value] of Object.entries(defaults)) if (!process.env[key]) process.env[key] = value;
 if (process.env.TEST_DATABASE_URL) process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;

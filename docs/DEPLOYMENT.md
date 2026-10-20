@@ -21,6 +21,8 @@ Target: **Railway** for the web service, the background worker and PostgreSQL; *
 | Railway account (a paid plan is needed for always-on services) | hosting | railway.com | yes |
 | PostgreSQL | state | Railway's PostgreSQL service, or any managed PostgreSQL 16 such as Neon (use `?sslmode=require`) | yes |
 | France Travail API client | France job offers | create an application at francetravail.io, subscribe it to **Offres d'emploi v2**, copy client id and secret | optional |
+| Mailbox that receives job alerts, with IMAP access (`IMAP_URL`) | LinkedIn / Indeed / HelloWork / Welcome to the Jungle postings, free | create alerts on those sites; for Gmail create an app password at myaccount.google.com/apppasswords (2-step verification required) | optional |
+| Apify API token (`APIFY_API_TOKEN`) | opt-in paid scraping of LinkedIn, Indeed, HelloWork, Welcome to the Jungle | apify.com → Settings → API & Integrations; the free plan includes $5 of monthly credit. These portals' terms forbid automated collection: your decision | optional |
 | AI provider key and **exact** token prices | AI refinement, CV suggestions, cover letters | your provider's console; also set a spend limit there | optional |
 | Resend API key (or SMTP URL) and a verified sender | email digests | resend.com | optional |
 | Telegram bot token and chat id | Telegram digests | `@BotFather`, then message the bot and read your chat id | optional |
@@ -43,7 +45,7 @@ Do these in order; only the last one proves that background work is running.
 
 1. `GET <APP_URL>/api/health` returns `{"status":"ok","database":"ok",...}`.
 2. You can create the owner and sign in; signing out and back in works.
-3. In **Job sources** add a Greenhouse, Lever or Ashby board and press **Check connection**: it should show `Healthy` with an opening count. For France Travail the check confirms the credentials.
+3. In **Job sources** add a Greenhouse, Lever or Ashby board and press **Check connection**: it should show `Healthy` with an opening count. For France Travail the check confirms the credentials. For **Job-alert emails** it lists, per portal, the alert emails of the last 14 days and the postings read from them. For the **paid portal** sources it validates the Apify token and actor without starting a billed run. `IMAP_URL` and `APIFY_API_TOKEN` must be set on both services, because searches run in the worker.
 4. Complete your profile and a search profile, enable the source, press **Run job search**. The run should move from *Queued* to *Finished* within a minute or two on **Search history**, which lists what each source returned. If it stays queued, the worker is not running or points to a different database.
 5. Jobs appear under **Discover jobs** with scores and an explanation.
 6. (Optional) In **Settings** use *Send test email* / *Send test Telegram*.

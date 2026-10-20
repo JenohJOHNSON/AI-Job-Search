@@ -97,7 +97,8 @@ export async function processSearchRun(runId: string, finalAttempt = true): Prom
       try {
         const adapter = createProvider(setting.id, providerConfig(setting.config, setting.rateLimitMs, setting.strategies));
         const cap = Math.max(0, Math.min(setting.maxJobs, settings.limits.maxJobsPerProvider, settings.limits.maxTotalJobsPerRun - storedCount));
-        const result = await adapter.search({ ...request, maxJobs: Math.min(1_150, Math.max(cap, 1) * 4) });
+        // Free sources over-fetch so scoring can pick the best; pay-per-result sources fetch exactly their own limit.
+        const result = await adapter.search({ ...request, maxJobs: Math.min(1_150, Math.max(cap, 1) * 4), paidItems: Math.max(cap, 1) });
         const scored = result.jobs.map(job => ({ job, match: scoreJob(candidate, job, parsed) })).filter(item => item.match.score >= floor).sort((a, b) => b.match.score - a.match.score);
         let added = 0, duplicates = 0;
         for (const item of scored.slice(0, cap)) {
@@ -125,7 +126,8 @@ export async function processSearchRun(runId: string, finalAttempt = true): Prom
     await expireByDate();
 
     if (aiConfigured() && stored.size) {
-      const queue = [...stored.entries()].filter(([, item]) => !item.match.blockers.length && item.match.score >= settings.ai.matchThreshold).sort((a, b) => b[1].match.score - a[1].match.score);
+      // Postings known only from a job-alert email carry no description, so an AI analysis would add cost but no insight.
+      const queue = [...stored.entries()].filter(([, item]) => !item.match.blockers.length && item.match.score >= settings.ai.matchThreshold && !item.normalized.extractor.startsWith("email_alert")).sort((a, b) => b[1].match.score - a[1].match.score);
       for (const [jobId, item] of queue) {
         const prior = await db.jobAnalysis.findUnique({ where: { jobId_profileVersion_contentFingerprint: { jobId, profileVersion, contentFingerprint: item.fingerprint } } }); if (prior) continue;
         try {
