@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1.7
+# Background worker image for Railway. Railway builds the last stage of a Dockerfile and has no
+# build-target setting, so the worker service selects this file with the service variable
+#   RAILWAY_DOCKERFILE_PATH=Dockerfile.worker
+# It produces the same image as the "worker" target of ./Dockerfile, minus the Next.js build the
+# worker never uses. Keep the two in step.
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+
+FROM deps AS builder
+COPY prisma ./prisma
+RUN npx prisma generate
+
+FROM node:22-alpine AS worker
+WORKDIR /app
+ENV NODE_ENV=production
+RUN addgroup -S elan -g 1001 && adduser -S elan -u 1001 -G elan
+USER elan
+COPY --from=builder --chown=elan:elan /app/node_modules ./node_modules
+COPY --chown=elan:elan package.json tsconfig.json ./
+COPY --chown=elan:elan prisma ./prisma
+COPY --chown=elan:elan lib ./lib
+COPY --chown=elan:elan ai ./ai
+COPY --chown=elan:elan matching ./matching
+COPY --chown=elan:elan providers ./providers
+COPY --chown=elan:elan workers ./workers
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && exec ./node_modules/.bin/tsx workers/main.ts"]
