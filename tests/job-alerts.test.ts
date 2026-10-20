@@ -1,6 +1,8 @@
+import { EventEmitter } from "node:events";
+import type { ImapFlow } from "imapflow";
 import { describe, expect, it, vi } from "vitest";
 import { alertPortal, alertToJob, embeddedTarget, jobRef, parseAlertEmail, trackedLinks, type AlertMessage } from "@/providers/alerts";
-import { EmailAlertsProvider, imapSettings, type MailSource } from "@/providers/email-alerts";
+import { EmailAlertsProvider, imapSettings, imapSource, loginFailure, type MailSource } from "@/providers/email-alerts";
 import type { SearchRequest } from "@/providers/types";
 
 // Fixtures reproduce the structure of real alerts (October 2026) with invented companies, IDs and recipient.
@@ -145,6 +147,21 @@ describe("job-alert email source", () => {
       let message = ""; try { imapSettings(bad); } catch (error) { message = (error as Error).message; }
       expect(message).toContain("IMAP_URL is malformed"); expect(message).not.toContain("secretpw");
     }
+  });
+  it("closes the connection after a rejected login, quotes the server's reason and survives the late socket error", async () => {
+    const rejected = Object.assign(new Error("Command failed"), { authenticationFailed: true, responseText: "[AUTHENTICATIONFAILED] Invalid credentials (Failure)" });
+    const client = Object.assign(new EventEmitter(), { connect: vi.fn(async () => { throw rejected; }), close: vi.fn(), logout: vi.fn(async () => undefined) });
+    const source = imapSource("imaps://me%40gmail.com:secretpassword@imap.gmail.com:993/INBOX", () => client as unknown as ImapFlow);
+    const failure = await source.messagesSince(new Date(), 10).then(() => null, (error: Error & { code?: string }) => error);
+    expect(failure).toMatchObject({ code: "AUTH" });
+    expect(failure!.message).toContain('imap.gmail.com answered: "[AUTHENTICATIONFAILED] Invalid credentials (Failure)"'); expect(failure!.message).not.toContain("secretpassword");
+    expect(client.close).toHaveBeenCalledOnce();
+    // The production crash: a leftover socket timing out a minute later used to emit an unhandled "error" event.
+    expect(() => client.emit("error", Object.assign(new Error("Socket timeout"), { code: "ETIMEOUT" }))).not.toThrow();
+  });
+  it("treats Gmail's app-password requirement as a login problem and an unreachable server as retryable", () => {
+    expect(loginFailure(Object.assign(new Error("Command failed"), { responseText: "[ALERT] Application-specific password required: https://support.google.com/accounts/answer/185833 (Failure)" }), "me@gmail.com", "imap.gmail.com")).toMatchObject({ code: "AUTH", retryable: false });
+    expect(loginFailure(Object.assign(new Error("connect ETIMEDOUT 142.250.1.1:993"), { code: "ETIMEDOUT" }), "me@gmail.com", "imap.gmail.com")).toMatchObject({ code: "NETWORK", retryable: true });
   });
   it("reports a missing mailbox configuration as an authentication problem", async () => {
     const health = await new EmailAlertsProvider().healthCheck();

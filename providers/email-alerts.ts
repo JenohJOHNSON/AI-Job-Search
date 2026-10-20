@@ -20,17 +20,30 @@ export function imapSettings(imapUrl: string) {
   return { host: url.hostname, port: Number(url.port) || (secure ? 993 : 143), secure, user: decodeURIComponent(url.username), pass: decodeURIComponent(url.password), mailbox: decodeURIComponent(url.pathname.replace(/^\/+/, "")) || "INBOX" };
 }
 
-/** Reads job-alert emails from an IMAP mailbox, read-only: messages are never flagged, moved or deleted. */
-export function imapSource(imapUrl: string): MailSource {
+type ImapOptions = ConstructorParameters<typeof ImapFlow>[0];
+type ImapError = Error & { authenticationFailed?: boolean; responseText?: string; serverResponseCode?: string };
+
+/** Turns a failed IMAP login into a clear message, quoting the server's own reason (which never contains the password). */
+export function loginFailure(error: unknown, user: string, host: string) {
+  const failure = error as ImapError; const reply = (failure.responseText ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  const auth = Boolean(failure.authenticationFailed) || /AUTHENTICATIONFAILED|invalid credentials|application-specific password|web login required/i.test(`${failure.serverResponseCode ?? ""} ${reply} ${failure.message}`);
+  if (!auth) return new ProviderError("NETWORK", `Could not reach ${host}: ${failure.message}`, true);
+  return new ProviderError("AUTH", `The mailbox rejected the login for ${user}${reply ? ` (${host} answered: "${reply}")` : ""}. For Gmail, use a 16-letter app password without spaces, not your account password.`, false);
+}
+
+/**
+ * Reads job-alert emails from an IMAP mailbox, read-only: messages are never flagged, moved or deleted.
+ * The connection is always closed, even after a failed login, and its late socket errors are absorbed: an unhandled `error`
+ * event from a leftover socket would otherwise crash the worker process.
+ */
+export function imapSource(imapUrl: string, createClient: (options: ImapOptions) => ImapFlow = options => new ImapFlow(options)): MailSource {
   const { host, port, secure, user, pass, mailbox } = imapSettings(imapUrl);
   return {
     async messagesSince(since, limit) {
-      const client = new ImapFlow({ host, port, secure, auth: { user, pass }, logger: false, socketTimeout: 60_000, disableAutoIdle: true });
+      const client = createClient({ host, port, secure, auth: { user, pass }, logger: false, socketTimeout: 60_000, disableAutoIdle: true });
+      client.on("error", () => { /* reported by the command that failed; a late socket error must not become an uncaught exception */ });
       try { await client.connect(); }
-      catch (error) {
-        const message = (error as Error).message; const auth = /auth|login|credential|password|invalid/i.test(message) || (error as { authenticationFailed?: boolean }).authenticationFailed;
-        throw new ProviderError(auth ? "AUTH" : "NETWORK", auth ? `The mailbox rejected the login for ${user} (for Gmail, use an app password, not your account password).` : `Could not reach ${host}: ${message}`, !auth);
-      }
+      catch (error) { client.close(); throw loginFailure(error, user, host); }
       try {
         try { await client.mailboxOpen(mailbox, { readOnly: true }); } catch { throw new ProviderError("NOT_FOUND", `The mailbox folder "${mailbox}" does not exist.`, false); }
         const uids = new Set<number>();
