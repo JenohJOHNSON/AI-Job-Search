@@ -35,7 +35,7 @@ Target: **Railway** for the web service, the background worker and PostgreSQL; *
 3. **Worker service.** *New → GitHub repo → the same repository* again. In the service settings set **Config as Code** to `/railway.worker.json`. Give it the **same** variables (`DATABASE_URL`, secrets, AI and notification variables). It needs no domain and no port.
 4. **Order.** Both images run `prisma migrate deploy` on start; migrations are additive, so deploy order does not matter.
 5. **Owner account.** Open the public URL. The first screen asks for email, a password (12+ characters) and the `SETUP_SECRET`. Choose a unique password. Only one owner can ever be created.
-6. **Optional backup trigger.** The worker already runs the daily search by itself (Settings → Daily search). To also trigger it from GitHub, add the repository secrets `APP_URL` and `JOB_RUNNER_SECRET` and run **Daily job search** once with *Run workflow*. Automated triggers are skipped when a search finished in the last three hours, so the two never produce duplicate runs.
+6. **Optional backup trigger.** The worker already runs the daily search by itself (Settings → Daily search). To also trigger it from GitHub, add the repository secrets `APP_URL` (the public `https://` origin of the web service) and `JOB_RUNNER_SECRET` (the same value as in Railway) and run **Daily job search** once with *Run workflow*. Until both secrets exist the workflow skips with a warning instead of failing. Automated triggers are skipped when a search finished in the last three hours, so the two never produce duplicate runs.
 
 ## 3. Verify the deployment
 
