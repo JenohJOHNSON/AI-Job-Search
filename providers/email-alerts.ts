@@ -9,16 +9,27 @@ import { ProviderError, type JobProvider, type ProviderHealth, type ProviderSear
 export type MailSource = { messagesSince(since: Date, limit: number): Promise<{ messages: AlertMessage[]; mailbox: string }> };
 const MAX_MESSAGES = 120, MAX_RESOLUTIONS_PER_RUN = 80, MAX_RESOLUTIONS_PER_EMAIL = 25;
 
+/**
+ * Parses IMAP_URL without ever echoing it (it contains the password). An unencoded "@" in the address also works: URL parsing
+ * splits on the last "@", so "imaps://me@gmail.com:pw@imap.gmail.com" still yields the user "me@gmail.com".
+ */
+export function imapSettings(imapUrl: string) {
+  let url: URL; try { url = new URL(imapUrl.trim()); } catch { url = new URL("invalid://"); }
+  if (!["imaps:", "imap:"].includes(url.protocol) || !url.hostname || !url.username || !url.password) throw new ProviderError("AUTH", "IMAP_URL is malformed. Expected imaps://you%40gmail.com:APP-PASSWORD@imap.gmail.com:993/INBOX (user, password, host and optional folder).", false);
+  const secure = url.protocol === "imaps:";
+  return { host: url.hostname, port: Number(url.port) || (secure ? 993 : 143), secure, user: decodeURIComponent(url.username), pass: decodeURIComponent(url.password), mailbox: decodeURIComponent(url.pathname.replace(/^\/+/, "")) || "INBOX" };
+}
+
 /** Reads job-alert emails from an IMAP mailbox, read-only: messages are never flagged, moved or deleted. */
 export function imapSource(imapUrl: string): MailSource {
-  const url = new URL(imapUrl); const secure = url.protocol === "imaps:"; const mailbox = decodeURIComponent(url.pathname.replace(/^\/+/, "")) || "INBOX";
+  const { host, port, secure, user, pass, mailbox } = imapSettings(imapUrl);
   return {
     async messagesSince(since, limit) {
-      const client = new ImapFlow({ host: url.hostname, port: Number(url.port) || (secure ? 993 : 143), secure, auth: { user: decodeURIComponent(url.username), pass: decodeURIComponent(url.password) }, logger: false, socketTimeout: 60_000, disableAutoIdle: true });
+      const client = new ImapFlow({ host, port, secure, auth: { user, pass }, logger: false, socketTimeout: 60_000, disableAutoIdle: true });
       try { await client.connect(); }
       catch (error) {
         const message = (error as Error).message; const auth = /auth|login|credential|password|invalid/i.test(message) || (error as { authenticationFailed?: boolean }).authenticationFailed;
-        throw new ProviderError(auth ? "AUTH" : "NETWORK", auth ? `The mailbox rejected the login for ${decodeURIComponent(url.username)} (for Gmail, use an app password).` : `Could not reach ${url.hostname}: ${message}`, !auth);
+        throw new ProviderError(auth ? "AUTH" : "NETWORK", auth ? `The mailbox rejected the login for ${user} (for Gmail, use an app password, not your account password).` : `Could not reach ${host}: ${message}`, !auth);
       }
       try {
         try { await client.mailboxOpen(mailbox, { readOnly: true }); } catch { throw new ProviderError("NOT_FOUND", `The mailbox folder "${mailbox}" does not exist.`, false); }
@@ -31,7 +42,7 @@ export function imapSource(imapUrl: string): MailSource {
           if (!message.source) continue; const parsed = await simpleParser(message.source);
           messages.push({ from: parsed.from?.value[0]?.address ?? "", subject: parsed.subject ?? "", date: parsed.date ?? new Date(message.internalDate ?? Date.now()), text: parsed.text ?? "", html: typeof parsed.html === "string" ? parsed.html : "" });
         }
-        return { messages, mailbox: `${url.hostname}/${mailbox}` };
+        return { messages, mailbox: `${host}/${mailbox}` };
       } finally { await client.logout().catch(() => client.close()); }
     }
   };

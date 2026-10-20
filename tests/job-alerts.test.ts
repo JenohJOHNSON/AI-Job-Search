@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { alertPortal, alertToJob, embeddedTarget, jobRef, parseAlertEmail, trackedLinks, type AlertMessage } from "@/providers/alerts";
-import { EmailAlertsProvider, type MailSource } from "@/providers/email-alerts";
+import { EmailAlertsProvider, imapSettings, type MailSource } from "@/providers/email-alerts";
 import type { SearchRequest } from "@/providers/types";
 
 // Fixtures reproduce the structure of real alerts (October 2026) with invented companies, IDs and recipient.
@@ -135,6 +135,16 @@ describe("job-alert email source", () => {
   it("summarizes the mailbox per portal in the free connection check", async () => {
     const health = await new EmailAlertsProvider(source([message("jobs-noreply@linkedin.com", { text: linkedinText }), message("notification@emails.hellowork.com", { html: helloworkHtml })])).healthCheck();
     expect(health).toEqual({ status: "HEALTHY", detail: "Connected to imap.example.com/INBOX (read-only). Job alerts in the last 14 days: LinkedIn: 1 emails, 2 postings; Indeed: none; HelloWork: 1 emails, 2 postings; Welcome to the Jungle: none." });
+  });
+  it("parses IMAP_URL with an encoded or plain @ and rejects a malformed one without echoing the password", () => {
+    const expected = { host: "imap.gmail.com", port: 993, secure: true, user: "me@gmail.com", pass: "abcdefghijklmnop", mailbox: "INBOX" };
+    expect(imapSettings("imaps://me%40gmail.com:abcdefghijklmnop@imap.gmail.com:993/INBOX")).toEqual(expected);
+    expect(imapSettings(" imaps://me@gmail.com:abcdefghijklmnop@imap.gmail.com ")).toEqual(expected);
+    expect(imapSettings("imaps://me%40gmail.com:pw@imap.gmail.com/%5BGmail%5D%2FAll%20Mail").mailbox).toBe("[Gmail]/All Mail");
+    for (const bad of ["me@gmail.com:secretpw", "imaps://imap.gmail.com:993/INBOX", "https://me%40gmail.com:secretpw@imap.gmail.com"]) {
+      let message = ""; try { imapSettings(bad); } catch (error) { message = (error as Error).message; }
+      expect(message).toContain("IMAP_URL is malformed"); expect(message).not.toContain("secretpw");
+    }
   });
   it("reports a missing mailbox configuration as an authentication problem", async () => {
     const health = await new EmailAlertsProvider().healthCheck();
