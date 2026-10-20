@@ -20,7 +20,7 @@ All responses are JSON unless a download. Errors: `{error:string}` with an accur
 - `POST /api/jobs` manual posting `{title,companyName,location?,descriptionClean,sourceUrl,applicationUrl?,remoteType?,contractType?,salaryMin?,salaryMax?}` → Job (scored)
 - `POST /api/jobs/import-url` `{url}` → `{imported:[{id,title,duplicate}]}`; 422 for restricted platforms or pages without structured data
 - `GET /api/jobs/:id` → Job with `sources`, `analyses`, `application{history}`
-- `POST /api/jobs/:id/save` (never downgrades progress) · `POST /api/jobs/:id/dismiss` `{dismissed}` · `POST /api/jobs/:id/analyze` (409 when AI is not configured)
+- `POST /api/jobs/:id/save` (never downgrades progress) · `POST /api/jobs/:id/dismiss` `{dismissed}` · `POST /api/jobs/:id/analyze` (multi-model scoring when `OPENROUTER_API_KEY` is set, else the single-model analysis; 409 when AI is not configured or the job is already being scored)
 - `POST /api/jobs/:id/application` `{status,notes?,salaryDiscussed?,contact?,nextAction?,nextActionDate?,interviewDates?[]}` → Application
 - `POST /api/jobs/:id/documents` `{kind:"cv"|"cover-letter",language:"fr"|"en"}` → 202 `{queued,taskId}` (409 without AI) · `GET` → `{documents:[{id,kind,language,version,model,markdown,evidenceUsed,suggestedLearning,createdAt}]}`
 - `GET /api/documents/:id/export?format=md|html|pdf|docx`

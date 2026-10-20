@@ -57,12 +57,44 @@ test("the profile is saved, survives a reload, and a CV can be uploaded and down
 });
 
 test("a search profile can be created from a template, deactivated and reactivated", async ({ page }) => {
-  await signIn(page); await page.goto("/search-profiles");
+  await signIn(page);
+  // Two enabled sources make the source checkboxes meaningful. They are disabled again at the end, because later steps expect none.
+  const origin = new URL(page.url()).origin; const setSources = async (enabled: boolean) => { for (const id of ["greenhouse", "lever"]) expect((await page.request.patch(`/api/providers/${id}`, { data: { enabled }, headers: { origin } })).ok()).toBe(true); };
+  await setSources(true);
+  await page.goto("/search-profiles");
   await page.getByRole("button", { name: "Data & integration" }).click();
   await expect(page.getByLabel("Target job titles")).toHaveValue(/Développeur SSIS/);
+  const styles = page.getByRole("group", { name: /Work styles/ }), sources = page.getByRole("group", { name: /Sources to use/ });
+  const all = (group: typeof styles) => group.getByRole("checkbox", { name: "Select all" });
+
+  // Work styles: several at once, "Select all" follows the individual boxes, and an empty choice cannot be saved.
+  await expect(all(styles)).toBeChecked(); await expect(styles.getByText("3 of 3 selected")).toBeVisible();
+  await styles.getByRole("checkbox", { name: "On-site" }).uncheck(); await expect(all(styles)).not.toBeChecked(); await expect(styles.getByText("2 of 3 selected")).toBeVisible();
+  await styles.getByRole("checkbox", { name: "On-site" }).check(); await expect(all(styles)).toBeChecked();
+  await all(styles).uncheck(); await expect(styles.getByText("0 of 3 selected")).toBeVisible();
+  await page.getByRole("button", { name: "Create profile" }).click();
+  await expect(styles.getByRole("alert")).toHaveText("Choose at least one work style.");
+  await styles.getByRole("checkbox", { name: "Remote" }).check(); await styles.getByRole("checkbox", { name: "Hybrid" }).check();
+
+  // Sources: every enabled source is selected by default; disabled ones are listed but can never be selected.
+  await expect(all(sources)).toBeChecked(); await expect(sources.getByText("2 of 2 selected")).toBeVisible();
+  await expect(sources.getByRole("checkbox", { name: /LinkedIn/ })).toBeDisabled(); await expect(sources.getByRole("checkbox", { name: /LinkedIn/ })).not.toBeChecked();
+  await all(sources).uncheck(); await expect(sources.getByRole("checkbox", { name: /Greenhouse/ })).not.toBeChecked(); await expect(sources.getByRole("checkbox", { name: /LinkedIn/ })).not.toBeChecked();
+  await page.getByRole("button", { name: "Create profile" }).click(); await expect(sources.getByRole("alert")).toHaveText(/Choose at least one enabled source/);
+  await sources.getByRole("checkbox", { name: /Lever/ }).check(); await expect(all(sources)).not.toBeChecked();
   await page.getByRole("button", { name: "Create profile" }).click();
   await expect(page.getByText("Search profile created")).toBeVisible();
   await expect(page.getByRole("heading", { name: /Data & integration/ })).toBeVisible();
+  await expect(page.getByText("Remote, Hybrid · Lever")).toBeVisible();
+
+  // Saved choices come back when editing; selecting every enabled source is stored as "all enabled sources".
+  await page.getByRole("button", { name: "Edit" }).click();
+  await expect(styles.getByRole("checkbox", { name: "Remote" })).toBeChecked(); await expect(styles.getByRole("checkbox", { name: "On-site" })).not.toBeChecked();
+  await expect(sources.getByRole("checkbox", { name: /Lever/ })).toBeChecked(); await expect(sources.getByRole("checkbox", { name: /Greenhouse/ })).not.toBeChecked();
+  await sources.getByRole("checkbox", { name: /Greenhouse/ }).check(); await expect(all(sources)).toBeChecked();
+  await page.getByRole("button", { name: "Save changes" }).click(); await expect(page.getByText("Search profile updated")).toBeVisible();
+  await expect(page.getByText("Remote, Hybrid · All enabled sources (2)")).toBeVisible();
+  await setSources(false);
   await page.getByRole("button", { name: "Deactivate" }).click(); await expect(page.getByText("Inactive")).toBeVisible();
   await page.getByRole("button", { name: "Activate" }).click(); await expect(page.getByText("Active", { exact: true })).toBeVisible();
 });

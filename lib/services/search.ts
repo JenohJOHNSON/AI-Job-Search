@@ -1,17 +1,18 @@
 import { ErrorCode, Prisma, RunTrigger, type ProviderStatus } from "@prisma/client";
 import { evaluateJob } from "@/ai";
-import { aiConfigured, config } from "@/lib/config";
+import { aiConfigured, config, scoringConfigured } from "@/lib/config";
 import { db } from "@/lib/db";
 import { log } from "@/lib/log";
-import type { NormalizedJob } from "@/lib/schemas";
+import type { CandidateData, NormalizedJob, SearchProfileData } from "@/lib/schemas";
 import { expireByDate, reconcileCoverage, verifyStale } from "@/lib/services/lifecycle";
 import { ingestJob, saveMatch } from "@/lib/services/jobs";
 import { loadMatchingContext } from "@/lib/services/matching";
+import { scoreWithModels } from "@/lib/services/scoring";
 import { loadSettings } from "@/lib/services/settings";
 import { usageHooks } from "@/lib/services/usage";
 import { expandTitles } from "@/matching/queries";
 import { scoreJob, type MatchResult } from "@/matching/score";
-import { createProvider, type ProviderConfig, type ProviderError } from "@/providers";
+import { createProvider, type ProviderConfig, type ProviderError, type SearchRequest } from "@/providers";
 
 // Scheduled and GitHub-triggered runs are skipped when a run finished very recently; manual runs always proceed.
 const MIN_AUTOMATED_INTERVAL_MS = 3 * 3_600_000;
@@ -47,6 +48,26 @@ function providerConfig(value: Prisma.JsonValue, rateLimitMs: number, strategies
   return { boards: strings(object.boards), urls: strings(object.urls), allowedHosts: strings(object.allowedHosts), rateLimitMs, strategies: strings(strategies) };
 }
 
+/**
+ * Which enabled source serves which search profiles. A profile without a source list uses every enabled source; one with a
+ * list uses only those. Sources no enabled profile asked for are not searched.
+ */
+export function planSources<P extends Pick<SearchProfileData, "name" | "providers">>(profiles: P[], enabledSourceIds: string[]) {
+  const plan = enabledSourceIds.map(id => ({ id, profiles: profiles.filter(profile => !profile.providers.length || profile.providers.includes(id)) })).filter(entry => entry.profiles.length);
+  const enabled = new Set(enabledSourceIds);
+  const unserved = profiles.filter(profile => profile.providers.length && !profile.providers.some(id => enabled.has(id))).map(profile => profile.name);
+  return { plan, unserved };
+}
+/** The search request for one source: the titles, places, work styles and contracts of the profiles that use it. */
+export function searchRequestFor(profiles: SearchProfileData[], candidate: CandidateData): Omit<SearchRequest, "maxJobs"> {
+  const titles = profiles.flatMap(profile => [...profile.targetTitles, ...profile.alternativeTitles]);
+  return {
+    queries: expandTitles(titles.length ? titles : [...candidate.targetRoles, ...candidate.secondaryRoles]),
+    locations: [...new Set([...profiles.flatMap(profile => profile.locations), ...candidate.locations])], remotePreferences: [...new Set(profiles.flatMap(profile => profile.remotePreferences))],
+    datePostedWindow: Math.max(...profiles.map(profile => profile.datePostedWindow)), contractTypes: [...new Set([...profiles.flatMap(profile => profile.contractTypes), ...candidate.contractTypes])]
+  };
+}
+
 async function recordProvider(runId: string, providerId: string, outcome: { status: ProviderStatus; discovered?: number; valid?: number; invalid?: number; durationMs: number; code?: ErrorCode; message?: string; stats?: Prisma.InputJsonValue }) {
   const message = outcome.message?.slice(0, 2_000) || null; const ok = outcome.status === "HEALTHY" || outcome.status === "DEGRADED";
   await db.providerRun.create({ data: { runId, providerId, status: outcome.status, jobsDiscovered: outcome.discovered ?? 0, jobsValid: outcome.valid ?? 0, jobsInvalid: outcome.invalid ?? 0, durationMs: outcome.durationMs, errorCode: outcome.code, errorMessage: message, extractorStats: outcome.stats ?? {} } });
@@ -80,25 +101,22 @@ export async function processSearchRun(runId: string, finalAttempt = true): Prom
     const profiles = await db.searchProfile.findMany({ where: { userId: context.userId, enabled: true } });
     if (!profiles.length) { errors.push({ provider: "-", code: "UNKNOWN", message: "Create and enable at least one search profile." }); return finish(runId, "FAILED", totals, errors); }
     const { candidate, profiles: parsed, profileVersion } = context; const settings = await loadSettings(); const env = config();
-    const titles = parsed.flatMap(profile => [...profile.targetTitles, ...profile.alternativeTitles]); const queries = expandTitles(titles.length ? titles : [...candidate.targetRoles, ...candidate.secondaryRoles]);
-    const requested = new Set(parsed.flatMap(profile => profile.providers));
-    const providers = await db.providerSetting.findMany({ where: { enabled: true, supported: true, ...(requested.size ? { id: { in: [...requested] } } : {}) } });
-    if (!providers.length) { errors.push({ provider: "-", code: "UNKNOWN", message: "No job source is enabled. Enable and configure at least one source under Job sources." }); return finish(runId, "FAILED", totals, errors); }
+    const enabledSources = await db.providerSetting.findMany({ where: { enabled: true, supported: true }, orderBy: { id: "asc" } });
+    const { plan, unserved } = planSources(parsed, enabledSources.map(source => source.id));
+    for (const name of unserved) errors.push({ provider: "-", code: "UNKNOWN", message: `Search profile "${name}" selects only sources that are disabled, so it was not searched. Enable one under Job sources or edit the profile.` });
+    if (!plan.length) { errors.push({ provider: "-", code: "UNKNOWN", message: "No job source is enabled. Enable and configure at least one source under Job sources." }); return finish(runId, "FAILED", totals, errors); }
     const floor = Math.min(...parsed.map(profile => profile.minimumMatchScore));
-    const request = {
-      queries, locations: [...new Set([...parsed.flatMap(profile => profile.locations), ...candidate.locations])], remotePreferences: [...new Set(parsed.flatMap(profile => profile.remotePreferences))],
-      datePostedWindow: Math.max(...parsed.map(profile => profile.datePostedWindow)), contractTypes: [...new Set([...parsed.flatMap(profile => profile.contractTypes), ...candidate.contractTypes])]
-    };
     const stored = new Map<string, { match: MatchResult; normalized: NormalizedJob; fingerprint: string }>(); let storedCount = 0;
 
-    for (const setting of providers) {
+    for (const { id, profiles: served } of plan) {
+      const setting = enabledSources.find(source => source.id === id)!;
       if (storedCount >= settings.limits.maxTotalJobsPerRun) break;
       totals.providersAttempted++; const started = Date.now(); const seenAt = new Date();
       try {
         const adapter = createProvider(setting.id, providerConfig(setting.config, setting.rateLimitMs, setting.strategies));
         const cap = Math.max(0, Math.min(setting.maxJobs, settings.limits.maxJobsPerProvider, settings.limits.maxTotalJobsPerRun - storedCount));
         // Free sources over-fetch so scoring can pick the best; pay-per-result sources fetch exactly their own limit.
-        const result = await adapter.search({ ...request, maxJobs: Math.min(1_150, Math.max(cap, 1) * 4), paidItems: Math.max(cap, 1) });
+        const result = await adapter.search({ ...searchRequestFor(served, candidate), maxJobs: Math.min(1_150, Math.max(cap, 1) * 4), paidItems: Math.max(cap, 1) });
         const scored = result.jobs.map(job => ({ job, match: scoreJob(candidate, job, parsed) })).filter(item => item.match.score >= floor).sort((a, b) => b.match.score - a.match.score);
         let added = 0, duplicates = 0;
         for (const item of scored.slice(0, cap)) {
@@ -125,10 +143,22 @@ export async function processSearchRun(runId: string, finalAttempt = true): Prom
     }
     await expireByDate();
 
-    if (aiConfigured() && stored.size) {
+    const multiModel = scoringConfigured();
+    if ((multiModel || aiConfigured()) && stored.size) {
       // Postings known only from a job-alert email carry no description, so an AI analysis would add cost but no insight.
       const queue = [...stored.entries()].filter(([, item]) => !item.match.blockers.length && item.match.score >= settings.ai.matchThreshold && !item.normalized.extractor.startsWith("email_alert")).sort((a, b) => b[1].match.score - a[1].match.score);
-      for (const [jobId, item] of queue) {
+      let failedInARow = 0;
+      for (const [jobId, item] of multiModel ? queue : []) {
+        const outcome = await scoreWithModels(jobId, item.normalized, item.match, context);
+        if (outcome.status === "SKIPPED") continue;
+        if (outcome.status !== "FAILED") { totals.jobsAnalyzed++; failedInARow = 0; await db.searchRun.update({ where: { id: runId }, data: { jobsAnalyzed: totals.jobsAnalyzed } }); }
+        else failedInARow++;
+        if (outcome.stopped) { errors.push({ provider: "ai", code: "AI_PROVIDER", message: `AI scoring stopped: ${outcome.stopped.message}`.slice(0, 500) }); break; }
+        if (outcome.status === "FAILED") errors.push({ provider: "ai", code: "AI_PROVIDER", message: `No model could score "${item.normalized.title}": ${outcome.error ?? "unknown error"}`.slice(0, 500) });
+        // Repeated total failures mean every configured model is down or refusing: stop instead of burning attempts.
+        if (failedInARow >= 2) { errors.push({ provider: "ai", code: "AI_PROVIDER", message: "AI scoring stopped after two jobs in a row could not be scored by any model; rule-based scores are kept." }); break; }
+      }
+      for (const [jobId, item] of multiModel ? [] : queue) {
         const prior = await db.jobAnalysis.findUnique({ where: { jobId_profileVersion_contentFingerprint: { jobId, profileVersion, contentFingerprint: item.fingerprint } } }); if (prior) continue;
         try {
           const analyzed = await evaluateJob(candidate, item.normalized, usageHooks, item.match);

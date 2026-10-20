@@ -44,4 +44,11 @@ export const ago = (value: string | null | undefined) => {
 /** datetime-local inputs use the browser's zone; the API stores ISO instants. */
 export const toLocalInput = (value: string | null | undefined) => { if (!value) return ''; const d = new Date(value); const pad = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 export const fromLocalInput = (value: string) => value ? new Date(value).toISOString() : null;
-export const providerName: Record<string, string> = { france_travail: 'France Travail', greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', generic: 'Career page', manual: 'Manual import' };
+export const providerName: Record<string, string> = { france_travail: 'France Travail', greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', generic: 'Career page', manual: 'Manual import', email_alerts: 'Job-alert emails', linkedin: 'LinkedIn', indeed: 'Indeed', hellowork: 'HelloWork', wttj: 'Welcome to the Jungle' };
+/** "anthropic/claude-sonnet-5.5" → "Claude Sonnet 5.5", "openai/gpt-6-astra" → "GPT-6 Astra". */
+export const modelName = (id: string | null | undefined) => {
+  if (!id) return 'Unknown model';
+  const words = id.replace(/^~?[^/]*\//, '').replace(/:.*$/, '').split('-').filter(Boolean);
+  if (words[0]?.toLowerCase() === 'gpt' && words[1]) words.splice(0, 2, `GPT-${words[1]}`);
+  return words.map(word => /^gpt-/i.test(word) ? word : word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+};

@@ -15,8 +15,17 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().default(""),
   GEMINI_API_KEY: z.string().default(""),
   OPENROUTER_API_KEY: z.string().default(""),
+  // OpenRouter's API root. Only changed for an OpenRouter-compatible gateway or the local fake used by the browser test.
+  OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api/v1"),
   AI_INPUT_PRICE_PER_MILLION: z.coerce.number().positive().optional(),
   AI_OUTPUT_PRICE_PER_MILLION: z.coerce.number().positive().optional(),
+  // Multi-model job scoring through OpenRouter: one slot per independent evaluation, each "primary,fallback,fallback".
+  // An empty value disables that slot. IDs are OpenRouter model IDs (https://openrouter.ai/models); prices come from OpenRouter.
+  AI_SCORING_SLOT_1: z.string().default("anthropic/claude-sonnet-5.5,anthropic/claude-sonnet-5,openai/gpt-6.1-sol"),
+  AI_SCORING_SLOT_2: z.string().default("anthropic/claude-fable-5.1,anthropic/claude-fable-5,anthropic/claude-opus-5.5"),
+  AI_SCORING_SLOT_3: z.string().default("openai/gpt-6-astra,openai/gpt-6-luna,openai/gpt-6-sol"),
+  // "default" sends no reasoning setting and leaves each model at its own default.
+  AI_SCORING_REASONING_EFFORT: z.enum(["default", "minimal", "low", "medium", "high"]).default("low"),
   FRANCE_TRAVAIL_CLIENT_ID: z.string().default(""),
   FRANCE_TRAVAIL_CLIENT_SECRET: z.string().default(""),
   // Opt-in third-party scraping of job portals (LinkedIn, Indeed, HelloWork, Welcome to the Jungle); runs are billed to this Apify account.
@@ -58,3 +67,17 @@ export function aiConfigured() {
   const key = { openai: env.OPENAI_API_KEY, anthropic: env.ANTHROPIC_API_KEY, gemini: env.GEMINI_API_KEY, openrouter: env.OPENROUTER_API_KEY }[env.AI_PROVIDER];
   return Boolean(env.AI_MODEL && key && env.AI_INPUT_PRICE_PER_MILLION && env.AI_OUTPUT_PRICE_PER_MILLION);
 }
+
+const modelId = /^~?[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i;
+export type ScoringSlot = { slot: number; models: string[] };
+/** The configured scoring slots, in priority order. Malformed IDs are reported, never sent. */
+export function scoringSlots(): { slots: ScoringSlot[]; invalid: string[] } {
+  const env = config(); const invalid: string[] = [];
+  const slots = [env.AI_SCORING_SLOT_1, env.AI_SCORING_SLOT_2, env.AI_SCORING_SLOT_3].map((value, index) => {
+    const models = [...new Set(value.split(",").map(item => item.trim()).filter(Boolean))].filter(item => modelId.test(item) || (invalid.push(item), false));
+    return { slot: index + 1, models: models.slice(0, 4) };
+  }).filter(slot => slot.models.length > 0);
+  return { slots, invalid };
+}
+/** Multi-model scoring needs only an OpenRouter key: per-model prices are read from OpenRouter's catalog. */
+export function scoringConfigured() { return Boolean(config().OPENROUTER_API_KEY) && scoringSlots().slots.length > 0; }

@@ -4,8 +4,16 @@ import { canonicalJobHash, cleanLocation, cleanTitle, contentFingerprint, normal
 import type { NormalizedJob } from "@/lib/schemas";
 import type { MatchResult } from "@/matching/score";
 
-export const jobInclude = { sources: { orderBy: [{ isPrimary: "desc" as const }, { firstSeenAt: "asc" as const }] }, analyses: { orderBy: { createdAt: "desc" as const } }, application: { include: { history: { orderBy: { createdAt: "desc" as const } } } } };
-export function serializeJob<T extends { sources: { sourceUrl: string; isPrimary: boolean }[]; applicationUrl: string }>(job: T) { return { ...job, sourceUrl: job.sources.find(source => source.isPrimary)?.sourceUrl ?? job.sources[0]?.sourceUrl ?? job.applicationUrl }; }
+export const jobInclude = { sources: { orderBy: [{ isPrimary: "desc" as const }, { firstSeenAt: "asc" as const }] }, analyses: { orderBy: { createdAt: "desc" as const } }, scorings: { orderBy: { createdAt: "desc" as const }, take: 1, include: { scores: { orderBy: { slot: "asc" as const } } } }, application: { include: { history: { orderBy: { createdAt: "desc" as const } } } } };
+const numeric = (value: unknown) => value === null || value === undefined ? null : Number(value);
+type ScoringRow = { averageScore: unknown; costUsd: unknown; scores: { costUsd: unknown }[] };
+/** Adds the public source URL and turns stored decimals (averages, costs) into plain numbers for the interface. */
+export function serializeJob<T extends { sources: { sourceUrl: string; isPrimary: boolean }[]; applicationUrl: string; aiAverageScore?: unknown; scorings?: ScoringRow[] }>(job: T) {
+  return {
+    ...job, sourceUrl: job.sources.find(source => source.isPrimary)?.sourceUrl ?? job.sources[0]?.sourceUrl ?? job.applicationUrl, aiAverageScore: numeric(job.aiAverageScore),
+    ...(job.scorings ? { scorings: job.scorings.map(scoring => ({ ...scoring, averageScore: numeric(scoring.averageScore), costUsd: numeric(scoring.costUsd), scores: scoring.scores.map(score => ({ ...score, costUsd: numeric(score.costUsd) })) })) } : {})
+  };
+}
 
 // Employer-hosted applications are preferred over aggregator pages as the direct application link.
 const employerSources = new Set(["greenhouse", "lever", "ashby", "generic"]);

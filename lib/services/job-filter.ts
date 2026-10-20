@@ -25,7 +25,8 @@ export function buildJobFilter(query: URLSearchParams): Prisma.JobWhereInput {
   return and.length ? { AND: and } : {};
 }
 export const orderings: Record<string, Prisma.JobOrderByWithRelationInput[]> = {
-  score: [{ rankScore: { sort: "desc", nulls: "last" } }, { discoveredAt: "desc" }], newest: [{ discoveredAt: "desc" }], published: [{ publishedAt: { sort: "desc", nulls: "last" } }, { discoveredAt: "desc" }],
+  score: [{ rankScore: { sort: "desc", nulls: "last" } }, { aiAverageScore: { sort: "desc", nulls: "last" } }, { discoveredAt: "desc" }],
+  ai: [{ aiAverageScore: { sort: "desc", nulls: "last" } }, { rankScore: { sort: "desc", nulls: "last" } }, { discoveredAt: "desc" }], newest: [{ discoveredAt: "desc" }], published: [{ publishedAt: { sort: "desc", nulls: "last" } }, { discoveredAt: "desc" }],
   freshness: [{ lastSeenAt: "desc" }, { discoveredAt: "desc" }], salary: [{ salaryMax: { sort: "desc", nulls: "last" } }], company: [{ companyName: "asc" }, { title: "asc" }]
 };
 
