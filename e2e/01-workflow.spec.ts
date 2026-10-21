@@ -95,8 +95,11 @@ test("a search profile can be created from a template, deactivated and reactivat
   await page.getByRole("button", { name: "Save changes" }).click(); await expect(page.getByText("Search profile updated")).toBeVisible();
   await expect(page.getByText("Remote, Hybrid · All enabled sources (2)")).toBeVisible();
   await setSources(false);
-  await page.getByRole("button", { name: "Deactivate" }).click(); await expect(page.getByText("Inactive")).toBeVisible();
-  await page.getByRole("button", { name: "Activate" }).click(); await expect(page.getByText("Active", { exact: true })).toBeVisible();
+  // Scoped to the profile's own badge: the form's "Active" switch and its "Inactive profiles…" hint would otherwise match
+  // first and let the assertion pass before the list has refreshed (or fail as ambiguous once it has).
+  const badge = page.locator(".provider-row", { hasText: "Data & integration" }).locator("h3 .badge");
+  await page.getByRole("button", { name: "Deactivate" }).click(); await expect(badge).toHaveText("Inactive");
+  await page.getByRole("button", { name: "Activate" }).click(); await expect(badge).toHaveText("Active");
 });
 
 test("a source can be configured, validated and left clearly unchecked offline", async ({ page }) => {
